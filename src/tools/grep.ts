@@ -98,7 +98,7 @@ export class GrepTool extends BaseTool {
     }
 
     if (isRipgrepAvailable()) {
-      const rgArgs = [pattern, searchPath, "--no-heading", "--hidden=false"];
+      const rgArgs = [pattern, searchPath, "--no-heading"];
 
       if (globPattern) {
         rgArgs.push("--glob", globPattern);
@@ -144,6 +144,44 @@ export class GrepTool extends BaseTool {
         const lines = stdout.split("\n").filter(Boolean);
         return {
           content: truncateResult([`Found matches in ${lines.length} files:`, ...lines].join("\n")),
+          isError: false,
+        };
+      }
+
+      if (outputMode === "count") {
+        const normalized = stdout
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => {
+            const match = line.match(/^(.*?):(\d+)$/);
+            if (!match?.[1] || !match?.[2]) {
+              return line;
+            }
+
+            return `${match[1]}: ${match[2]} matches`;
+          });
+
+        return {
+          content: truncateResult(normalized.join("\n")),
+          isError: false,
+        };
+      }
+
+      if (outputMode === "content") {
+        const normalized = stdout
+          .split("\n")
+          .filter((line) => line.trim() !== "--")
+          .map((line) => {
+            const match = line.match(/^(.*?)(?:-|:)(\d+)(?:-|:)(.*)$/);
+            if (!match?.[1] || !match?.[2]) {
+              return line;
+            }
+
+            return `${match[1]}:${match[2]}:${match[3] ?? ""}`;
+          });
+
+        return {
+          content: truncateResult(normalized.join("\n")),
           isError: false,
         };
       }

@@ -5,13 +5,17 @@ export interface ChangeCount {
   removed: number;
 }
 
+function toLines(content: string): string[] {
+  return content.length === 0 ? [] : content.split("\n");
+}
+
 export function generateDiff(oldContent: string, newContent: string, filePath: string): string {
   return createPatch(filePath, oldContent, newContent, "before", "after");
 }
 
 export function countChanges(oldContent: string, newContent: string): ChangeCount {
-  const oldLines = oldContent.split("\n");
-  const newLines = newContent.split("\n");
+  const oldLines = toLines(oldContent);
+  const newLines = toLines(newContent);
 
   let prefix = 0;
   while (

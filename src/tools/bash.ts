@@ -81,7 +81,7 @@ export class BashTool extends BaseTool {
       };
     }
 
-    const wrappedCommand = `${command}\nprintf '\n${PWD_MARKER}%s' \"$PWD\"`;
+    const wrappedCommand = `{ ${command}; __bomba_status=$?; printf '\\n${PWD_MARKER}%s' \"$PWD\"; exit $__bomba_status; }`;
 
     return await new Promise<ToolExecuteResult>((resolve) => {
       const child = spawn("bash", ["-lc", wrappedCommand], {
