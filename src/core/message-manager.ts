@@ -1,4 +1,4 @@
-import type { Message, ToolCall } from "../llm/types.js";
+import type { Message, ToolCall, ToolResult } from "../llm/types.js";
 import { TokenCounter } from "../llm/token-counter.js";
 
 export class MessageManager {
@@ -32,6 +32,13 @@ export class MessageManager {
    */
   addToolResult(toolUseId: string, content: string): void {
     this.messages.push({ role: "tool", toolUseId, content });
+  }
+
+  /**
+   * Add a structured tool result
+   */
+  addToolExecutionResult(result: ToolResult): void {
+    this.messages.push({ role: "tool", toolUseId: result.toolUseId, content: result.content });
   }
 
   /**
