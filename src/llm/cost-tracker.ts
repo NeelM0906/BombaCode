@@ -53,16 +53,19 @@ export class CostTracker {
     this.turnCount++;
 
     const pricing = MODEL_PRICING[model] ?? DEFAULT_PRICING;
-    const cost =
-      (usage.inputTokens * pricing.input + usage.outputTokens * pricing.output) / 1_000_000;
 
-    // Cache reads are 90% cheaper
-    if (usage.cacheReadTokens) {
-      const cacheDiscount = (usage.cacheReadTokens * pricing.input * 0.9) / 1_000_000;
-      this.totalCost += cost - cacheDiscount;
-    } else {
-      this.totalCost += cost;
-    }
+    // Anthropic reports cache tokens separately from inputTokens,
+    // so compute each segment independently:
+    //   - base input tokens at full price
+    //   - output tokens at full price
+    //   - cache reads at 10% of input price (90% discount)
+    //   - cache writes at 125% of input price (25% surcharge)
+    const baseCost =
+      (usage.inputTokens * pricing.input + usage.outputTokens * pricing.output) / 1_000_000;
+    const cacheReadCost = ((usage.cacheReadTokens ?? 0) * pricing.input * 0.1) / 1_000_000;
+    const cacheWriteCost = ((usage.cacheWriteTokens ?? 0) * pricing.input * 1.25) / 1_000_000;
+
+    this.totalCost += baseCost + cacheReadCost + cacheWriteCost;
   }
 
   getSessionCost(): number {
