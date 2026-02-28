@@ -15,9 +15,10 @@ describe("GlobTool", () => {
 
     try {
       const tool = new GlobTool();
-      const result = await tool.run({ pattern: "**/*.ts" });
-      expect(result).toContain("a.ts");
-      expect(result).not.toContain("b.js");
+      const result = await tool.execute({ pattern: "**/*.ts" });
+      expect(result.isError).toBe(false);
+      expect(result.content).toContain("a.ts");
+      expect(result.content).not.toContain("b.js");
     } finally {
       process.chdir(previousCwd);
     }
