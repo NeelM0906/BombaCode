@@ -75,6 +75,7 @@ describe("AnthropicProvider", () => {
       },
     ]);
     expect(payload.thinking).toEqual({ type: "enabled", budget_tokens: 1200 });
+    expect(payload.temperature).toBe(1); // Anthropic requires temp=1 with thinking
     expect(payload.tools).toHaveLength(1);
 
     expect(response.content).toBe("Done.");
@@ -153,6 +154,7 @@ describe("AnthropicProvider", () => {
       },
     ]);
     expect(payload.thinking).toEqual({ type: "enabled", budget_tokens: 1500 });
+    expect(payload.temperature).toBe(1); // Anthropic requires temp=1 with thinking
 
     expect(events).toContainEqual({
       type: "tool_call_start",

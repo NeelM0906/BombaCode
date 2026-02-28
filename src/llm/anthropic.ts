@@ -56,6 +56,9 @@ export class AnthropicProvider implements LLMProvider {
     // Strip the provider prefix for direct Anthropic calls
     const model = this.stripProviderPrefix(request.model);
 
+    // Anthropic requires temperature=1 when thinking is enabled
+    const temperature = thinking ? 1 : (request.temperature ?? 0);
+
     const response = await this.withRetry(async () => {
       return this.client.messages.create(
         {
@@ -65,7 +68,7 @@ export class AnthropicProvider implements LLMProvider {
           tools: tools && tools.length > 0 ? tools : undefined,
           thinking,
           max_tokens: request.maxTokens ?? 4096,
-          temperature: request.temperature ?? 0,
+          temperature,
         },
         { signal: request.abortSignal }
       );
@@ -125,6 +128,9 @@ export class AnthropicProvider implements LLMProvider {
 
     const model = this.stripProviderPrefix(request.model);
 
+    // Anthropic requires temperature=1 when thinking is enabled
+    const temperature = thinking ? 1 : (request.temperature ?? 0);
+
     const stream = this.client.messages.stream(
       {
         model,
@@ -133,7 +139,7 @@ export class AnthropicProvider implements LLMProvider {
         tools: tools && tools.length > 0 ? tools : undefined,
         thinking,
         max_tokens: request.maxTokens ?? 4096,
-        temperature: request.temperature ?? 0,
+        temperature,
       },
       { signal: request.abortSignal }
     );
