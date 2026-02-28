@@ -3,7 +3,6 @@ import { Box, Text, useApp, useInput } from "ink";
 import { Header } from "./components/Header.js";
 import { InputBar } from "./components/InputBar.js";
 import { MessageList } from "./components/MessageList.js";
-import { ToolOutput } from "./components/ToolOutput.js";
 import { AgentLoop } from "../core/agent-loop.js";
 import { MessageManager } from "../core/message-manager.js";
 import { CostTracker } from "../llm/cost-tracker.js";
@@ -29,7 +28,6 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
   const [totalTokens, setTotalTokens] = useState(0);
   const [totalCost, setTotalCost] = useState(0);
   const [error, setError] = useState<string | undefined>(undefined);
-  const [collapseToolOutputs, setCollapseToolOutputs] = useState(false);
 
   // Refs for agent loop components (persist across renders)
   const messageManagerRef = useRef<MessageManager>(new MessageManager());
@@ -135,11 +133,6 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
 
   // Ctrl+C to abort current operation or exit
   useInput((inputChar, key) => {
-    if (inputChar === "t" && !key.ctrl && !key.meta && !isLoading) {
-      setCollapseToolOutputs((value) => !value);
-      return;
-    }
-
     if (key.ctrl && inputChar === "c") {
       if (isLoading && agentLoopRef.current) {
         agentLoopRef.current.abort();
@@ -150,14 +143,6 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
       }
     }
   });
-
-  const toolOutputs = messages
-    .filter((message) => message.role === "tool")
-    .map((message, index) => ({
-      id: `${index}-${message.toolUseId}`,
-      tool: `tool:${message.toolUseId}`,
-      content: message.content,
-    }));
 
   return (
     <Box flexDirection="column">
@@ -178,26 +163,13 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
           </Text>
           {resumeId ? <Text dimColor>Resuming session: {resumeId}</Text> : null}
           <Text dimColor>
-            Commands: /clear, /cost, /exit | toggle tool output: t
+            Commands: /clear, /cost, /exit
           </Text>
         </Box>
       )}
 
       {/* Messages */}
       <MessageList messages={messages} streamingText={streamingText} />
-
-      {toolOutputs.length > 0 && (
-        <Box flexDirection="column" marginTop={1}>
-          <Box paddingX={1}>
-            <Text color="magenta" bold>
-              Tool output ({toolOutputs.length}) - {collapseToolOutputs ? "collapsed" : "expanded"}
-            </Text>
-          </Box>
-          {toolOutputs.map((item) => (
-            <ToolOutput key={item.id} item={item} collapsed={collapseToolOutputs} />
-          ))}
-        </Box>
-      )}
 
       {/* Error display */}
       {error && (

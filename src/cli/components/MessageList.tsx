@@ -1,66 +1,112 @@
 import React from "react";
-import { Box, Text, Static } from "ink";
+import { Box, Text } from "ink";
 import { MarkdownText } from "./MarkdownRenderer.js";
-import type { Message } from "../../llm/types.js";
+import { ToolOutput } from "./ToolOutput.js";
+import type { Message, ToolCall, ToolResult } from "../../llm/types.js";
 
 interface MessageListProps {
   messages: Message[];
   streamingText?: string;
+  activeToolCalls?: Map<string, ToolCall>;
+  toolResults?: Map<string, ToolResult>;
 }
 
-const MessageBubble: React.FC<{ message: Message }> = ({ message }) => {
-  if (message.role === "user") {
-    return (
-      <Box flexDirection="column" marginTop={1} paddingX={1}>
-        <Text color="green" bold>You:</Text>
-        <Box marginLeft={2}>
-          <Text>{message.content}</Text>
-        </Box>
+function createToolResultMap(
+  messages: Message[],
+  toolResults?: Map<string, ToolResult>
+): Map<string, ToolResult> {
+  const combined = new Map<string, ToolResult>(toolResults ? [...toolResults.entries()] : []);
+
+  for (const message of messages) {
+    if (message.role !== "tool") {
+      continue;
+    }
+
+    combined.set(message.toolUseId, {
+      toolUseId: message.toolUseId,
+      content: message.content,
+      isError: message.content.startsWith("Error:"),
+    });
+  }
+
+  return combined;
+}
+
+const UserMessage: React.FC<{ content: string }> = ({ content }) => (
+  <Box flexDirection="column" marginTop={1} paddingX={1}>
+    <Text color="green" bold>
+      You:
+    </Text>
+    <Box marginLeft={2}>
+      <Text>{content}</Text>
+    </Box>
+  </Box>
+);
+
+const AssistantMessage: React.FC<{ content: string }> = ({ content }) => (
+  <Box flexDirection="column" marginTop={1} paddingX={1}>
+    <Text color="cyan" bold>
+      BombaCode:
+    </Text>
+    {content ? (
+      <Box marginLeft={2}>
+        <MarkdownText content={content} />
       </Box>
-    );
-  }
+    ) : null}
+  </Box>
+);
 
-  if (message.role === "assistant") {
-    return (
-      <Box flexDirection="column" marginTop={1} paddingX={1}>
-        <Text color="cyan" bold>BombaCode:</Text>
-        <Box marginLeft={2}>
-          <MarkdownText content={message.content} />
-        </Box>
-      </Box>
-    );
-  }
+export const MessageList: React.FC<MessageListProps> = ({
+  messages,
+  streamingText,
+  activeToolCalls,
+  toolResults,
+}) => {
+  const resultMap = createToolResultMap(messages, toolResults);
 
-  // Tool output is rendered in a dedicated panel.
-  if (message.role === "tool") {
-    return null;
-  }
-
-  return null;
-};
-
-export const MessageList: React.FC<MessageListProps> = ({ messages, streamingText }) => {
   return (
     <Box flexDirection="column" flexGrow={1}>
-      {/* Completed messages — Static prevents re-rendering */}
-      <Static items={messages.map((msg, i) => ({ id: String(i), msg }))}>
-        {({ id, msg }) => (
-          <Box key={id}>
-            <MessageBubble message={msg} />
-          </Box>
-        )}
-      </Static>
+      {messages.map((message, index) => {
+        if (message.role === "user") {
+          return <UserMessage key={`user-${index}`} content={message.content} />;
+        }
 
-      {/* Currently streaming message */}
-      {streamingText !== undefined && streamingText.length > 0 && (
+        if (message.role === "assistant") {
+          return (
+            <Box key={`assistant-${index}`} flexDirection="column">
+              <AssistantMessage content={message.content} />
+
+              {message.toolCalls?.map((toolCall) => {
+                const result = resultMap.get(toolCall.id);
+                const isRunning = !result && (activeToolCalls?.has(toolCall.id) ?? true);
+
+                return (
+                  <ToolOutput
+                    key={`tool-${toolCall.id}`}
+                    toolCall={toolCall}
+                    result={result}
+                    isRunning={isRunning}
+                  />
+                );
+              })}
+            </Box>
+          );
+        }
+
+        return null;
+      })}
+
+      {streamingText && streamingText.length > 0 ? (
         <Box flexDirection="column" marginTop={1} paddingX={1}>
-          <Text color="cyan" bold>BombaCode:</Text>
+          <Text color="cyan" bold>
+            BombaCode:
+          </Text>
           <Box marginLeft={2}>
             <MarkdownText content={streamingText} />
             <Text color="gray">█</Text>
           </Box>
         </Box>
-      )}
+      ) : null}
     </Box>
   );
 };

@@ -5,9 +5,10 @@ interface HeaderProps {
   model: string;
   tokens: number;
   cost: number;
+  activeToolName?: string;
 }
 
-export const Header: React.FC<HeaderProps> = ({ model, tokens, cost }) => {
+export const Header: React.FC<HeaderProps> = ({ model, tokens, cost, activeToolName }) => {
   // Shorten model name for display (e.g., "anthropic/claude-sonnet-4-5-20250929" → "claude-sonnet-4-5")
   const shortModel = model.includes("/")
     ? model.split("/")[1]?.replace(/-\d{8}$/, "") ?? model
@@ -27,6 +28,11 @@ export const Header: React.FC<HeaderProps> = ({ model, tokens, cost }) => {
       <Text dimColor>
         {shortModel} | {tokens.toLocaleString()} tokens | ${cost.toFixed(4)}
       </Text>
+      {activeToolName ? (
+        <Text color="yellow">Tool: {activeToolName}</Text>
+      ) : (
+        <Text dimColor>No active tool</Text>
+      )}
     </Box>
   );
 };
