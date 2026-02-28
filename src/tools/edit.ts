@@ -118,13 +118,15 @@ export class EditTool extends BaseTool {
 
       const diff = generateDiff(originalContent, updatedContent, resolvedPath);
       const changeCounts = countChanges(originalContent, updatedContent);
-      void diff;
+      const diffPreview = diff.split("\n").slice(0, 80).join("\n");
 
       return {
         content: [
           `Applied edit to ${resolvedPath}:`,
           `- ${changeCounts.removed} lines removed`,
           `- ${changeCounts.added} lines added`,
+          "",
+          diffPreview,
         ].join("\n"),
         isError: false,
       };
