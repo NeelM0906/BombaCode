@@ -8,6 +8,7 @@ import { SessionManager } from "./core/session-manager.js";
 import { getConfigPath, hasApiKey, loadSettings, saveSettings } from "./memory/settings.js";
 import { logger } from "./utils/logger.js";
 import type { Settings } from "./memory/settings.js";
+import type { PermissionMode } from "./core/permission-manager.js";
 
 const VERSION = "0.1.0";
 
@@ -16,6 +17,14 @@ function parseProvider(value: string): Settings["provider"] {
     return value;
   }
   throw new Error(`Unsupported provider: ${value}`);
+}
+
+function parsePermissionMode(value: string): PermissionMode {
+  if (value === "normal" || value === "auto-edit" || value === "yolo" || value === "plan") {
+    return value;
+  }
+
+  throw new Error(`Unsupported mode: ${value}`);
 }
 
 function launchApp(settings: Settings, initialPrompt?: string, resumeId?: string): void {
@@ -43,11 +52,22 @@ function launchWizard(initialPrompt?: string, resumeId?: string): void {
   void waitUntilExit();
 }
 
-function applyRuntimeOverrides(settings: Settings, options: { model?: string; provider?: string }): Settings {
+function applyRuntimeOverrides(
+  settings: Settings,
+  options: { model?: string; provider?: string; mode?: string }
+): Settings {
   const next: Settings = {
     ...settings,
     ...(options.model ? { defaultModel: options.model } : {}),
     ...(options.provider ? { provider: parseProvider(options.provider) } : {}),
+    ...(options.mode
+      ? {
+          permissions: {
+            ...settings.permissions,
+            mode: parsePermissionMode(options.mode),
+          },
+        }
+      : {}),
   };
 
   return next;
@@ -88,11 +108,12 @@ program
   .version(VERSION)
   .option("-m, --model <model>", "Override default model")
   .option("-p, --provider <provider>", "Override provider (openrouter|openai-compat|anthropic)")
+  .option("--mode <mode>", "Permission mode: normal, auto-edit, yolo, plan")
   .option("-c, --continue", "Resume last session")
   .option("--resume <id>", "Resume a specific session by id")
   .option("--config", "Open settings")
   .argument("[prompt...]", "Initial prompt")
-  .action((promptWords: string[], options: { model?: string; provider?: string; continue?: boolean; resume?: string; config?: boolean }) => {
+  .action((promptWords: string[], options: { model?: string; provider?: string; mode?: string; continue?: boolean; resume?: string; config?: boolean }) => {
     if (options.config) {
       openConfigInEditor();
       return;
