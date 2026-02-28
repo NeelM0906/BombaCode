@@ -125,7 +125,7 @@ describe("CostTracker", () => {
       outputTokens: 1000,
     });
 
-    const summary = tracker.getSummary("anthropic/claude-sonnet-4-6");
+    const summary = tracker.getSummary();
     expect(summary).toContain("6,000 tokens");
     expect(summary).toContain("$");
     expect(summary).toContain("1 turns");

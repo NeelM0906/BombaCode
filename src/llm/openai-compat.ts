@@ -1,6 +1,5 @@
 import OpenAI from "openai";
-import { logger } from "../utils/logger.js";
-import { withCancellation, withRetry } from "./streaming.js";
+import { withCancellation, withRetry, parseToolArguments } from "./streaming.js";
 import type { LLMProvider, LLMRequest, LLMResponse, StreamEvent, ToolCall, TokenUsage } from "./types.js";
 
 const MODEL_CONTEXT: Record<string, number> = {
@@ -206,7 +205,7 @@ export class OpenAICompatProvider implements LLMProvider {
         toolCall: {
           id: pending.id,
           name: pending.name,
-          input: this.parseToolArguments(pending.args),
+          input: parseToolArguments(pending.args),
         },
       };
     }
@@ -232,21 +231,8 @@ export class OpenAICompatProvider implements LLMProvider {
       .map((toolCall) => ({
         id: toolCall.id,
         name: toolCall.function.name,
-        input: this.parseToolArguments(toolCall.function.arguments),
+        input: parseToolArguments(toolCall.function.arguments),
       }));
-  }
-
-  private parseToolArguments(raw: string | undefined): Record<string, unknown> {
-    if (!raw || raw.trim().length === 0) {
-      return {};
-    }
-
-    try {
-      return JSON.parse(raw) as Record<string, unknown>;
-    } catch {
-      logger.warn("Failed to parse tool call arguments", raw);
-      return {};
-    }
   }
 
   private buildMessages(request: LLMRequest): OpenAI.ChatCompletionMessageParam[] {

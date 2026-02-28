@@ -1,10 +1,5 @@
 // ─── Message Types ───
 
-export interface SystemMessage {
-  role: "system";
-  content: string;
-}
-
 export type Message =
   | { role: "user"; content: string }
   | { role: "assistant"; content: string; toolCalls?: ToolCall[] }

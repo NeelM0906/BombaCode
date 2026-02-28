@@ -95,7 +95,7 @@ export class CostTracker {
   /**
    * Get a formatted summary string
    */
-  getSummary(model: string): string {
+  getSummary(): string {
     const total = this.getTotalTokens();
     const cost = this.getSessionCost();
     return `${total.toLocaleString()} tokens | $${cost.toFixed(4)} | ${this.turnCount} turns`;

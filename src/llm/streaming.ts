@@ -91,3 +91,17 @@ export async function withRetry<T>(
 
   throw lastError ?? new Error("Max retries exceeded");
 }
+
+/**
+ * Safely parse JSON tool call arguments. Returns empty object on failure.
+ */
+export function parseToolArguments(raw: string | undefined): Record<string, unknown> {
+  if (!raw || raw.trim().length === 0) {
+    return {};
+  }
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}

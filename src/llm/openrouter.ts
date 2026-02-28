@@ -1,6 +1,5 @@
 import OpenAI from "openai";
-import { logger } from "../utils/logger.js";
-import { withCancellation, withRetry } from "./streaming.js";
+import { withCancellation, withRetry, parseToolArguments } from "./streaming.js";
 import type {
   LLMProvider,
   LLMRequest,
@@ -93,7 +92,7 @@ export class OpenRouterProvider implements LLMProvider {
       .map((tc) => ({
         id: tc.id,
         name: tc.function.name,
-        input: this.parseToolArguments(tc.function.arguments),
+        input: parseToolArguments(tc.function.arguments),
       }));
 
     const usage: TokenUsage = {
@@ -196,7 +195,7 @@ export class OpenRouterProvider implements LLMProvider {
         toolCall: {
           id: pending.id,
           name: pending.name,
-          input: this.parseToolArguments(pending.args),
+          input: parseToolArguments(pending.args),
         },
       };
     }
@@ -248,16 +247,4 @@ export class OpenRouterProvider implements LLMProvider {
     return msgs;
   }
 
-  private parseToolArguments(raw: string | undefined): Record<string, unknown> {
-    if (!raw || raw.trim().length === 0) {
-      return {};
-    }
-
-    try {
-      return JSON.parse(raw) as Record<string, unknown>;
-    } catch {
-      logger.warn("Failed to parse tool call arguments", raw);
-      return {};
-    }
-  }
 }
