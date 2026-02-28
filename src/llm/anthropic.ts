@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { logger } from "../utils/logger.js";
-import { isAbortError, withCancellation } from "./streaming.js";
+import { isAbortError, withCancellation, withRetry } from "./streaming.js";
 import type {
   LLMProvider,
   LLMRequest,
@@ -59,7 +59,7 @@ export class AnthropicProvider implements LLMProvider {
     // Anthropic requires temperature=1 when thinking is enabled
     const temperature = thinking ? 1 : (request.temperature ?? 0);
 
-    const response = await this.withRetry(async () => {
+    const response = await withRetry(async () => {
       return this.client.messages.create(
         {
           model,
@@ -293,44 +293,4 @@ export class AnthropicProvider implements LLMProvider {
     };
   }
 
-  private async withRetry<T>(
-    fn: () => Promise<T>,
-    signal?: AbortSignal,
-    maxRetries = 3
-  ): Promise<T> {
-    let lastError: Error | undefined;
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        return await fn();
-      } catch (err: unknown) {
-        if (signal?.aborted || isAbortError(err)) {
-          throw err;
-        }
-
-        lastError = err instanceof Error ? err : new Error(String(err));
-        const status = (err as { status?: number }).status;
-
-        if (status === 401) {
-          throw new Error("Invalid API key. Run `bomba init` to reconfigure.");
-        }
-
-        if (status === 429 && attempt < maxRetries) {
-          const delay = Math.pow(2, attempt) * 1000;
-          logger.warn(`Rate limited. Retrying in ${delay / 1000}s...`);
-          await new Promise((r) => setTimeout(r, delay));
-          continue;
-        }
-
-        if (status && status >= 500 && attempt < maxRetries) {
-          const delay = Math.pow(2, attempt) * 1000;
-          logger.warn(`Server error (${status}). Retrying in ${delay / 1000}s...`);
-          await new Promise((r) => setTimeout(r, delay));
-          continue;
-        }
-
-        throw lastError;
-      }
-    }
-    throw lastError ?? new Error("Max retries exceeded");
-  }
 }

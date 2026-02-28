@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAbortError, withCancellation } from "../../src/llm/streaming.js";
+import { isAbortError, withCancellation, abortableSleep, withRetry } from "../../src/llm/streaming.js";
 
 async function* asyncItems<T>(items: T[]): AsyncGenerator<T> {
   for (const item of items) {
@@ -73,5 +73,73 @@ describe("withCancellation", () => {
       items.push(item);
     }
     expect(items).toEqual([10, 20]);
+  });
+});
+
+describe("abortableSleep", () => {
+  it("resolves after the specified delay", async () => {
+    const start = Date.now();
+    await abortableSleep(50);
+    expect(Date.now() - start).toBeGreaterThanOrEqual(40);
+  });
+
+  it("rejects immediately if signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(abortableSleep(5000, controller.signal)).rejects.toThrow();
+  });
+
+  it("rejects when signal is aborted during sleep", async () => {
+    const controller = new AbortController();
+    const sleepPromise = abortableSleep(5000, controller.signal);
+    setTimeout(() => controller.abort(), 20);
+    await expect(sleepPromise).rejects.toThrow();
+  });
+});
+
+describe("withRetry", () => {
+  it("returns result on first success", async () => {
+    const result = await withRetry(async () => "ok");
+    expect(result).toBe("ok");
+  });
+
+  it("retries on 429 and succeeds", async () => {
+    let attempt = 0;
+    const result = await withRetry(async () => {
+      attempt++;
+      if (attempt === 1) {
+        const err = new Error("rate limited") as Error & { status: number };
+        err.status = 429;
+        throw err;
+      }
+      return "recovered";
+    }, undefined, 3);
+
+    expect(result).toBe("recovered");
+    expect(attempt).toBe(2);
+  });
+
+  it("throws immediately on 401", async () => {
+    await expect(
+      withRetry(async () => {
+        const err = new Error("unauthorized") as Error & { status: number };
+        err.status = 401;
+        throw err;
+      })
+    ).rejects.toThrow("Invalid API key");
+  });
+
+  it("throws after max retries exhausted", async () => {
+    await expect(
+      withRetry(
+        async () => {
+          const err = new Error("overloaded") as Error & { status: number };
+          err.status = 529;
+          throw err;
+        },
+        undefined,
+        0
+      )
+    ).rejects.toThrow("overloaded");
   });
 });

@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { logger } from "../utils/logger.js";
-import { isAbortError, withCancellation } from "./streaming.js";
+import { withCancellation, withRetry } from "./streaming.js";
 import type {
   LLMProvider,
   LLMRequest,
@@ -69,7 +69,7 @@ export class OpenRouterProvider implements LLMProvider {
       },
     }));
 
-    const response = await this.withRetry(async () => {
+    const response = await withRetry(async () => {
       return this.client.chat.completions.create(
         {
           model: request.model,
@@ -122,7 +122,7 @@ export class OpenRouterProvider implements LLMProvider {
       },
     }));
 
-    const stream = await this.withRetry(async () => {
+    const stream = await withRetry(async () => {
       return this.client.chat.completions.create(
         {
           model: request.model,
@@ -246,47 +246,6 @@ export class OpenRouterProvider implements LLMProvider {
     }
 
     return msgs;
-  }
-
-  private async withRetry<T>(
-    fn: () => Promise<T>,
-    signal?: AbortSignal,
-    maxRetries = 3
-  ): Promise<T> {
-    let lastError: Error | undefined;
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        return await fn();
-      } catch (err: unknown) {
-        if (signal?.aborted || isAbortError(err)) {
-          throw err;
-        }
-
-        lastError = err instanceof Error ? err : new Error(String(err));
-        const status = (err as { status?: number }).status;
-
-        if (status === 401) {
-          throw new Error("Invalid API key. Run `bomba init` to reconfigure.");
-        }
-
-        if (status === 429 && attempt < maxRetries) {
-          const delay = Math.pow(2, attempt) * 1000;
-          logger.warn(`Rate limited. Retrying in ${delay / 1000}s...`);
-          await new Promise((r) => setTimeout(r, delay));
-          continue;
-        }
-
-        if (status && status >= 500 && attempt < maxRetries) {
-          const delay = Math.pow(2, attempt) * 1000;
-          logger.warn(`Server error (${status}). Retrying in ${delay / 1000}s...`);
-          await new Promise((r) => setTimeout(r, delay));
-          continue;
-        }
-
-        throw lastError;
-      }
-    }
-    throw lastError ?? new Error("Max retries exceeded");
   }
 
   private parseToolArguments(raw: string | undefined): Record<string, unknown> {
