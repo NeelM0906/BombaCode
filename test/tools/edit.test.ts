@@ -11,7 +11,7 @@ describe("EditTool", () => {
     await writeFile(filePath, "alpha beta", "utf8");
 
     const tool = new EditTool();
-    await tool.run({ path: filePath, from: "beta", to: "gamma" });
+    await tool.execute({ file_path: filePath, old_string: "beta", new_string: "gamma" });
 
     const next = await readFile(filePath, "utf8");
     expect(next).toBe("alpha gamma");
