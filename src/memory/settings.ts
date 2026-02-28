@@ -9,7 +9,14 @@ const ModelConfigSchema = z.object({
   powerful: z.string(),
 });
 
-const PermissionSettingSchema = z.enum(["allow", "deny", "ask"]);
+const PermissionModeSchema = z.enum(["normal", "auto-edit", "yolo", "plan"]);
+
+const PermissionRuleSchema = z.object({
+  type: z.enum(["allow", "deny", "ask"]),
+  tool: z.string().optional(),
+  pathPattern: z.string().optional(),
+  commandPattern: z.string().optional(),
+});
 
 const MCPServerSchema = z.object({
   command: z.string(),
@@ -32,14 +39,15 @@ export const SettingsSchema = z.object({
   autoCompactAt: z.number().min(0).max(1).default(0.85),
   permissions: z
     .object({
-      allowFileWrite: PermissionSettingSchema.default("ask"),
-      allowBash: PermissionSettingSchema.default("ask"),
-      allowNetwork: PermissionSettingSchema.default("ask"),
+      mode: PermissionModeSchema.default("normal"),
+      customRules: z.array(PermissionRuleSchema).default([]),
+      allowFileWrite: z.enum(["allow", "deny", "ask"]).optional(),
+      allowBash: z.enum(["allow", "deny", "ask"]).optional(),
+      allowNetwork: z.enum(["allow", "deny", "ask"]).optional(),
     })
     .default({
-      allowFileWrite: "ask",
-      allowBash: "ask",
-      allowNetwork: "ask",
+      mode: "normal",
+      customRules: [],
     }),
   mcpServers: z.record(z.string(), MCPServerSchema).default({}),
 });

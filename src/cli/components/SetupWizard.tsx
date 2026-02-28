@@ -109,9 +109,8 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
       maxTokenBudget: null,
       autoCompactAt: 0.85,
       permissions: {
-        allowFileWrite: "ask",
-        allowBash: "ask",
-        allowNetwork: "ask",
+        mode: "normal",
+        customRules: [],
       },
       mcpServers: {},
     };

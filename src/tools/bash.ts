@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { BaseTool } from "./base-tool.js";
 import type { ToolExecuteResult } from "./base-tool.js";
-import { isCommandSafe } from "../security/command-filter.js";
+import { isDangerousCommand } from "../security/command-filter.js";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_TIMEOUT_MS = 600_000;
@@ -73,9 +73,10 @@ export class BashTool extends BaseTool {
       };
     }
 
-    if (!isCommandSafe(command)) {
+    const commandSafety = isDangerousCommand(command);
+    if (commandSafety.dangerous) {
       return {
-        content: "Error: Command blocked by security policy.",
+        content: `Error: Command blocked by security policy. ${commandSafety.reason ?? ""}`.trim(),
         isError: true,
       };
     }

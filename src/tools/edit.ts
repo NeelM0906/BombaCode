@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { BaseTool } from "./base-tool.js";
 import { countChanges, generateDiff } from "../utils/diff.js";
+import { resolveToolPath } from "../security/path-validator.js";
 
 function countOccurrences(content: string, target: string): number {
   if (target.length === 0) {
@@ -30,6 +31,8 @@ function replaceAllExact(content: string, oldString: string, newString: string):
 }
 
 export class EditTool extends BaseTool {
+  private readonly projectRoot: string;
+
   name = "edit";
   description = [
     "Make targeted edits to an existing file using exact string matching.",
@@ -49,6 +52,11 @@ export class EditTool extends BaseTool {
     required: ["file_path", "old_string", "new_string"],
     additionalProperties: false,
   };
+
+  constructor(projectRoot = process.cwd()) {
+    super();
+    this.projectRoot = projectRoot;
+  }
 
   async run(input: Record<string, unknown>) {
     const filePath = typeof input.file_path === "string" ? input.file_path.trim() : "";
@@ -78,7 +86,8 @@ export class EditTool extends BaseTool {
     }
 
     try {
-      const originalContent = await readFile(filePath, "utf8");
+      const resolvedPath = await resolveToolPath(filePath, process.cwd(), this.projectRoot);
+      const originalContent = await readFile(resolvedPath, "utf8");
       const matchCount = countOccurrences(originalContent, oldString);
 
       if (matchCount === 0) {
@@ -102,18 +111,18 @@ export class EditTool extends BaseTool {
         ? replaceAllExact(originalContent, oldString, newString)
         : originalContent.replace(oldString, newString);
 
-      await mkdir(dirname(filePath), { recursive: true });
-      const tempPath = `${filePath}.tmp.${randomUUID()}`;
+      await mkdir(dirname(resolvedPath), { recursive: true });
+      const tempPath = `${resolvedPath}.tmp.${randomUUID()}`;
       await writeFile(tempPath, updatedContent, "utf8");
-      await rename(tempPath, filePath);
+      await rename(tempPath, resolvedPath);
 
-      const diff = generateDiff(originalContent, updatedContent, filePath);
+      const diff = generateDiff(originalContent, updatedContent, resolvedPath);
       const changeCounts = countChanges(originalContent, updatedContent);
       void diff;
 
       return {
         content: [
-          `Applied edit to ${filePath}:`,
+          `Applied edit to ${resolvedPath}:`,
           `- ${changeCounts.removed} lines removed`,
           `- ${changeCounts.added} lines added`,
         ].join("\n"),

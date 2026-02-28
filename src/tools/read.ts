@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { BaseTool, formatLineNumbers, truncateLines } from "./base-tool.js";
+import { resolveToolPath } from "../security/path-validator.js";
 
 const BINARY_SAMPLE_BYTES = 8 * 1024;
 const DEFAULT_LINE_LIMIT = 2_000;
@@ -23,6 +24,8 @@ function isLikelyBinary(content: Buffer): boolean {
 }
 
 export class ReadTool extends BaseTool {
+  private readonly projectRoot: string;
+
   name = "read";
   description = [
     "Read the contents of a file at the given path.",
@@ -43,6 +46,11 @@ export class ReadTool extends BaseTool {
     additionalProperties: false,
   };
 
+  constructor(projectRoot = process.cwd()) {
+    super();
+    this.projectRoot = projectRoot;
+  }
+
   async run(input: Record<string, unknown>) {
     const filePath = typeof input.file_path === "string" ? input.file_path.trim() : "";
 
@@ -57,7 +65,8 @@ export class ReadTool extends BaseTool {
     const limit = parsePositiveInteger(input.limit, DEFAULT_LINE_LIMIT);
 
     try {
-      const raw = await readFile(filePath);
+      const resolvedPath = await resolveToolPath(filePath, process.cwd(), this.projectRoot);
+      const raw = await readFile(resolvedPath);
       if (isLikelyBinary(raw)) {
         return {
           content: `Binary file detected (${raw.byteLength.toLocaleString()} bytes). Use a specific tool to process binary files.`,

@@ -2,6 +2,7 @@ import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { BaseTool } from "./base-tool.js";
+import { resolveToolPath } from "../security/path-validator.js";
 
 function countLines(content: string): number {
   if (content.length === 0) {
@@ -11,6 +12,8 @@ function countLines(content: string): number {
 }
 
 export class WriteTool extends BaseTool {
+  private readonly projectRoot: string;
+
   name = "write";
   description = [
     "Write content to a file.",
@@ -29,6 +32,11 @@ export class WriteTool extends BaseTool {
     additionalProperties: false,
   };
 
+  constructor(projectRoot = process.cwd()) {
+    super();
+    this.projectRoot = projectRoot;
+  }
+
   async run(input: Record<string, unknown>) {
     const filePath = typeof input.file_path === "string" ? input.file_path.trim() : "";
     const content = typeof input.content === "string" ? input.content : "";
@@ -41,17 +49,18 @@ export class WriteTool extends BaseTool {
     }
 
     try {
-      await mkdir(dirname(filePath), { recursive: true });
+      const resolvedPath = await resolveToolPath(filePath, process.cwd(), this.projectRoot);
+      await mkdir(dirname(resolvedPath), { recursive: true });
 
-      const tempPath = `${filePath}.tmp.${randomUUID()}`;
+      const tempPath = `${resolvedPath}.tmp.${randomUUID()}`;
       await writeFile(tempPath, content, "utf8");
-      await rename(tempPath, filePath);
+      await rename(tempPath, resolvedPath);
 
       const lineCount = countLines(content);
       const warning = content.length === 0 ? " (warning: empty content)" : "";
 
       return {
-        content: `Successfully wrote ${lineCount} lines to ${filePath}${warning}`,
+        content: `Successfully wrote ${lineCount} lines to ${resolvedPath}${warning}`,
         isError: false,
       };
     } catch (error: unknown) {
