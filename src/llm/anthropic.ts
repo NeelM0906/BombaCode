@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { logger } from "../utils/logger.js";
+import { isAbortError, withCancellation } from "./streaming.js";
 import type {
   LLMProvider,
   LLMRequest,
@@ -26,8 +27,26 @@ export class AnthropicProvider implements LLMProvider {
     this.client = new Anthropic({ apiKey });
   }
 
+  supportsTools(): boolean {
+    return true;
+  }
+
+  supportsThinking(): boolean {
+    return true;
+  }
+
+  supportsCaching(): boolean {
+    return true;
+  }
+
+  estimateTokens(text: string): number {
+    return Math.max(1, Math.ceil(text.length / 4));
+  }
+
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
     const messages = this.buildMessages(request);
+    const system = this.buildSystemPrompt(request.systemPrompt);
+    const thinking = this.buildThinking(request);
     const tools = request.tools?.map((t) => ({
       name: t.name,
       description: t.description,
@@ -38,23 +57,30 @@ export class AnthropicProvider implements LLMProvider {
     const model = this.stripProviderPrefix(request.model);
 
     const response = await this.withRetry(async () => {
-      return this.client.messages.create({
-        model,
-        system: request.systemPrompt || undefined,
-        messages,
-        tools: tools && tools.length > 0 ? tools : undefined,
-        max_tokens: request.maxTokens ?? 4096,
-        temperature: request.temperature ?? 0,
-      });
-    });
+      return this.client.messages.create(
+        {
+          model,
+          system,
+          messages,
+          tools: tools && tools.length > 0 ? tools : undefined,
+          thinking,
+          max_tokens: request.maxTokens ?? 4096,
+          temperature: request.temperature ?? 0,
+        },
+        { signal: request.abortSignal }
+      );
+    }, request.abortSignal);
 
     // Parse content blocks
     let content = "";
+    let thinkingContent = "";
     const toolCalls: ToolCall[] = [];
 
     for (const block of response.content) {
       if (block.type === "text") {
         content += block.text;
+      } else if (block.type === "thinking") {
+        thinkingContent += block.thinking;
       } else if (block.type === "tool_use") {
         toolCalls.push({
           id: block.id,
@@ -78,11 +104,19 @@ export class AnthropicProvider implements LLMProvider {
           ? "max_tokens"
           : "end_turn";
 
-    return { content, toolCalls, stopReason, usage };
+    return {
+      content,
+      thinkingContent: thinkingContent || undefined,
+      toolCalls,
+      stopReason,
+      usage,
+    };
   }
 
   async *streamMessage(request: LLMRequest): AsyncGenerator<StreamEvent> {
     const messages = this.buildMessages(request);
+    const system = this.buildSystemPrompt(request.systemPrompt);
+    const thinking = this.buildThinking(request);
     const tools = request.tools?.map((t) => ({
       name: t.name,
       description: t.description,
@@ -91,21 +125,25 @@ export class AnthropicProvider implements LLMProvider {
 
     const model = this.stripProviderPrefix(request.model);
 
-    const stream = this.client.messages.stream({
-      model,
-      system: request.systemPrompt || undefined,
-      messages,
-      tools: tools && tools.length > 0 ? tools : undefined,
-      max_tokens: request.maxTokens ?? 4096,
-      temperature: request.temperature ?? 0,
-    });
+    const stream = this.client.messages.stream(
+      {
+        model,
+        system,
+        messages,
+        tools: tools && tools.length > 0 ? tools : undefined,
+        thinking,
+        max_tokens: request.maxTokens ?? 4096,
+        temperature: request.temperature ?? 0,
+      },
+      { signal: request.abortSignal }
+    );
 
     // Track current tool call being built
     let currentToolId = "";
     let currentToolName = "";
     let currentToolArgs = "";
 
-    for await (const event of stream) {
+    for await (const event of withCancellation(stream, request.abortSignal)) {
       if (event.type === "content_block_start") {
         const block = event.content_block;
         if (block.type === "tool_use") {
@@ -138,23 +176,24 @@ export class AnthropicProvider implements LLMProvider {
           currentToolName = "";
           currentToolArgs = "";
         }
-      } else if (event.type === "message_delta") {
-        // Usage comes with the final message_delta
-        const usage = (event as unknown as Record<string, unknown>).usage as Record<string, number> | undefined;
-        if (usage) {
-          yield {
-            type: "usage",
-            usage: {
-              inputTokens: usage.input_tokens ?? 0,
-              outputTokens: usage.output_tokens ?? 0,
-            },
-          };
-        }
       }
     }
 
+    if (request.abortSignal?.aborted) {
+      return;
+    }
+
     // Get final message for usage
-    const finalMessage = await stream.finalMessage();
+    const finalMessage = await stream.finalMessage().catch((error: unknown) => {
+      if (request.abortSignal?.aborted || isAbortError(error)) {
+        return null;
+      }
+      throw error;
+    });
+    if (!finalMessage) {
+      return;
+    }
+
     yield {
       type: "usage",
       usage: {
@@ -219,12 +258,49 @@ export class AnthropicProvider implements LLMProvider {
     return msgs;
   }
 
-  private async withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+  private buildSystemPrompt(systemPrompt?: string): Anthropic.MessageCreateParams["system"] {
+    if (!systemPrompt) {
+      return undefined;
+    }
+
+    return [
+      {
+        type: "text",
+        text: systemPrompt,
+        cache_control: { type: "ephemeral" },
+      },
+    ];
+  }
+
+  private buildThinking(request: LLMRequest): Anthropic.ThinkingConfigParam | undefined {
+    if (!request.thinking?.enabled) {
+      return undefined;
+    }
+
+    const maxTokens = request.maxTokens ?? 4096;
+    const requestedBudget = request.thinking.budgetTokens ?? Math.min(2048, Math.max(1024, maxTokens - 1));
+    const safeBudget = Math.max(1024, Math.min(requestedBudget, Math.max(1024, maxTokens - 1)));
+
+    return {
+      type: "enabled",
+      budget_tokens: safeBudget,
+    };
+  }
+
+  private async withRetry<T>(
+    fn: () => Promise<T>,
+    signal?: AbortSignal,
+    maxRetries = 3
+  ): Promise<T> {
     let lastError: Error | undefined;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         return await fn();
       } catch (err: unknown) {
+        if (signal?.aborted || isAbortError(err)) {
+          throw err;
+        }
+
         lastError = err instanceof Error ? err : new Error(String(err));
         const status = (err as { status?: number }).status;
 

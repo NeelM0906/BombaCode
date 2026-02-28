@@ -30,6 +30,11 @@ export interface ToolResult {
   isError: boolean;
 }
 
+export interface ThinkingConfig {
+  enabled: boolean;
+  budgetTokens?: number;
+}
+
 // ─── LLM Request / Response ───
 
 export interface LLMRequest {
@@ -37,12 +42,15 @@ export interface LLMRequest {
   systemPrompt?: string;
   messages: Message[];
   tools?: ToolDefinition[];
+  thinking?: ThinkingConfig;
   maxTokens?: number;
   temperature?: number;
+  abortSignal?: AbortSignal;
 }
 
 export interface LLMResponse {
   content: string;
+  thinkingContent?: string;
   toolCalls: ToolCall[];
   stopReason: "end_turn" | "tool_use" | "max_tokens";
   usage: TokenUsage;
@@ -75,4 +83,8 @@ export interface LLMProvider {
   createMessage(request: LLMRequest): Promise<LLMResponse>;
   streamMessage(request: LLMRequest): AsyncGenerator<StreamEvent>;
   getMaxContextTokens(model: string): number;
+  supportsTools(): boolean;
+  supportsThinking(): boolean;
+  supportsCaching(): boolean;
+  estimateTokens(text: string): number;
 }

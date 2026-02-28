@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { logger } from "../utils/logger.js";
+import { isAbortError, withCancellation } from "./streaming.js";
 import type {
   LLMProvider,
   LLMRequest,
@@ -7,7 +8,6 @@ import type {
   StreamEvent,
   ToolCall,
   TokenUsage,
-  Message,
 } from "./types.js";
 
 // Max context tokens per model (conservative estimates)
@@ -42,6 +42,22 @@ export class OpenRouterProvider implements LLMProvider {
     });
   }
 
+  supportsTools(): boolean {
+    return true;
+  }
+
+  supportsThinking(): boolean {
+    return false;
+  }
+
+  supportsCaching(): boolean {
+    return false;
+  }
+
+  estimateTokens(text: string): number {
+    return Math.max(1, Math.ceil(text.length / 4));
+  }
+
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
     const messages = this.buildMessages(request);
     const tools = request.tools?.map((t) => ({
@@ -54,26 +70,30 @@ export class OpenRouterProvider implements LLMProvider {
     }));
 
     const response = await this.withRetry(async () => {
-      return this.client.chat.completions.create({
-        model: request.model,
-        messages,
-        tools: tools && tools.length > 0 ? tools : undefined,
-        max_tokens: request.maxTokens ?? 4096,
-        temperature: request.temperature ?? 0,
-      });
-    });
+      return this.client.chat.completions.create(
+        {
+          model: request.model,
+          messages,
+          tools: tools && tools.length > 0 ? tools : undefined,
+          max_tokens: request.maxTokens ?? 4096,
+          temperature: request.temperature ?? 0,
+        },
+        { signal: request.abortSignal }
+      );
+    }, request.abortSignal);
 
     // Parse response
     const choice = response.choices[0];
     const content = choice?.message?.content ?? "";
     const toolCalls: ToolCall[] = (choice?.message?.tool_calls ?? [])
-      .filter((tc): tc is OpenAI.ChatCompletionMessageToolCall & { type: "function" } =>
-        tc.type === "function"
+      .filter(
+        (tc): tc is OpenAI.ChatCompletionMessageToolCall & { type: "function" } =>
+          tc.type === "function"
       )
       .map((tc) => ({
         id: tc.id,
         name: tc.function.name,
-        input: JSON.parse(tc.function.arguments || "{}") as Record<string, unknown>,
+        input: this.parseToolArguments(tc.function.arguments),
       }));
 
     const usage: TokenUsage = {
@@ -103,21 +123,24 @@ export class OpenRouterProvider implements LLMProvider {
     }));
 
     const stream = await this.withRetry(async () => {
-      return this.client.chat.completions.create({
-        model: request.model,
-        messages,
-        tools: tools && tools.length > 0 ? tools : undefined,
-        max_tokens: request.maxTokens ?? 4096,
-        temperature: request.temperature ?? 0,
-        stream: true,
-        stream_options: { include_usage: true },
-      });
-    });
+      return this.client.chat.completions.create(
+        {
+          model: request.model,
+          messages,
+          tools: tools && tools.length > 0 ? tools : undefined,
+          max_tokens: request.maxTokens ?? 4096,
+          temperature: request.temperature ?? 0,
+          stream: true,
+          stream_options: { include_usage: true },
+        },
+        { signal: request.abortSignal }
+      );
+    }, request.abortSignal);
 
     // Track tool calls being assembled across chunks
-    const pendingToolCalls: Map<number, { id: string; name: string; args: string }> = new Map();
+    const pendingToolCalls: Map<number, { id: string; name: string; args: string; started: boolean }> = new Map();
 
-    for await (const chunk of stream) {
+    for await (const chunk of withCancellation(stream, request.abortSignal)) {
       const delta = chunk.choices[0]?.delta;
 
       // Text content
@@ -130,14 +153,20 @@ export class OpenRouterProvider implements LLMProvider {
         for (const tc of delta.tool_calls) {
           const idx = tc.index;
           if (!pendingToolCalls.has(idx)) {
-            pendingToolCalls.set(idx, { id: tc.id ?? "", name: tc.function?.name ?? "", args: "" });
-            if (tc.id && tc.function?.name) {
-              yield { type: "tool_call_start", toolCall: { id: tc.id, name: tc.function.name } };
-            }
+            pendingToolCalls.set(idx, {
+              id: tc.id ?? "",
+              name: tc.function?.name ?? "",
+              args: "",
+              started: false,
+            });
           }
           const pending = pendingToolCalls.get(idx)!;
           if (tc.id) pending.id = tc.id;
           if (tc.function?.name) pending.name = tc.function.name;
+          if (!pending.started && pending.id && pending.name) {
+            pending.started = true;
+            yield { type: "tool_call_start", toolCall: { id: pending.id, name: pending.name } };
+          }
           if (tc.function?.arguments) {
             pending.args += tc.function.arguments;
             yield { type: "tool_call_delta", content: tc.function.arguments };
@@ -159,15 +188,16 @@ export class OpenRouterProvider implements LLMProvider {
 
     // Emit completed tool calls
     for (const pending of pendingToolCalls.values()) {
-      let input: Record<string, unknown> = {};
-      try {
-        input = JSON.parse(pending.args || "{}");
-      } catch {
-        logger.warn("Failed to parse tool call arguments", pending.args);
+      if (!pending.started && pending.id && pending.name) {
+        yield { type: "tool_call_start", toolCall: { id: pending.id, name: pending.name } };
       }
       yield {
         type: "tool_call_end",
-        toolCall: { id: pending.id, name: pending.name, input },
+        toolCall: {
+          id: pending.id,
+          name: pending.name,
+          input: this.parseToolArguments(pending.args),
+        },
       };
     }
 
@@ -218,12 +248,20 @@ export class OpenRouterProvider implements LLMProvider {
     return msgs;
   }
 
-  private async withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+  private async withRetry<T>(
+    fn: () => Promise<T>,
+    signal?: AbortSignal,
+    maxRetries = 3
+  ): Promise<T> {
     let lastError: Error | undefined;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         return await fn();
       } catch (err: unknown) {
+        if (signal?.aborted || isAbortError(err)) {
+          throw err;
+        }
+
         lastError = err instanceof Error ? err : new Error(String(err));
         const status = (err as { status?: number }).status;
 
@@ -249,5 +287,18 @@ export class OpenRouterProvider implements LLMProvider {
       }
     }
     throw lastError ?? new Error("Max retries exceeded");
+  }
+
+  private parseToolArguments(raw: string | undefined): Record<string, unknown> {
+    if (!raw || raw.trim().length === 0) {
+      return {};
+    }
+
+    try {
+      return JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      logger.warn("Failed to parse tool call arguments", raw);
+      return {};
+    }
   }
 }

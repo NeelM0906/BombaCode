@@ -40,6 +40,22 @@ class MockProvider implements LLMProvider {
     this.mode = mode;
   }
 
+  supportsTools(): boolean {
+    return true;
+  }
+
+  supportsThinking(): boolean {
+    return false;
+  }
+
+  supportsCaching(): boolean {
+    return false;
+  }
+
+  estimateTokens(text: string): number {
+    return Math.max(1, Math.ceil(text.length / 4));
+  }
+
   async createMessage(_request: LLMRequest): Promise<LLMResponse> {
     return {
       content: "",

@@ -3,6 +3,7 @@ import type { LLMRequest, LLMResponse, StreamEvent } from "./types.js";
 export interface ProviderCapabilities {
   supportsTools: boolean;
   supportsPromptCaching: boolean;
+  supportsThinking: boolean;
 }
 
 export interface ProviderConfig {
@@ -16,4 +17,8 @@ export interface Provider {
   createMessage(request: LLMRequest): Promise<LLMResponse>;
   streamMessage(request: LLMRequest): AsyncGenerator<StreamEvent>;
   getMaxContextTokens(model: string): number;
+  supportsTools(): boolean;
+  supportsThinking(): boolean;
+  supportsCaching(): boolean;
+  estimateTokens(text: string): number;
 }

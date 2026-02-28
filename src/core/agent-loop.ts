@@ -4,6 +4,7 @@ import type { MessageManager } from "./message-manager.js";
 import type { ToolRegistry } from "./tool-registry.js";
 import type { ToolRouter } from "./tool-router.js";
 import { logger } from "../utils/logger.js";
+import { isAbortError } from "../llm/streaming.js";
 
 export interface AgentLoopConfig {
   messageManager: MessageManager;
@@ -35,6 +36,7 @@ export class AgentLoop {
   private maxTurns: number;
   private _isProcessing = false;
   private _aborted = false;
+  private activeAbortController: AbortController | null = null;
 
   private readonly onStreamDelta?: (text: string) => void;
   private readonly onStreamEnd?: (fullResponse: string) => void;
@@ -68,10 +70,10 @@ export class AgentLoop {
 
     this._isProcessing = true;
     this._aborted = false;
+    let fullTextResponse = "";
 
     try {
       this.messageManager.addUserMessage(input);
-      let fullTextResponse = "";
       let turnCount = 0;
 
       while (true) {
@@ -91,47 +93,66 @@ export class AgentLoop {
 
         const requestTools = this.toolRegistry?.getToolDefinitions() ?? [];
 
+        this.activeAbortController = new AbortController();
         const stream = this.provider.streamMessage({
           model: this.model,
           systemPrompt: this.systemPrompt,
           messages: this.messageManager.getMessages(),
           tools: requestTools.length > 0 ? requestTools : undefined,
           maxTokens: this.maxTokens,
+          abortSignal: this.activeAbortController.signal,
         });
 
         let turnText = "";
         const toolCalls: ToolCall[] = [];
+        let streamAborted = false;
 
-        for await (const event of stream) {
-          if (this._aborted) {
-            logger.info("Agent loop aborted during stream processing");
-            break;
-          }
+        try {
+          for await (const event of stream) {
+            if (this._aborted) {
+              logger.info("Agent loop aborted during stream processing");
+              streamAborted = true;
+              break;
+            }
 
-          switch (event.type) {
-            case "text_delta":
-              turnText += event.content;
-              this.onStreamDelta?.(event.content);
-              break;
-            case "tool_call_start":
-              this.onToolCallStart?.({
-                id: event.toolCall.id,
-                name: event.toolCall.name,
-                input: {},
-              });
-              break;
-            case "tool_call_end":
-              toolCalls.push(event.toolCall);
-              break;
-            case "usage":
-              this.costTracker.recordUsage(this.model, event.usage);
-              this.onUsageUpdate?.(event.usage);
-              break;
-            case "error":
-              throw new Error(event.error);
-            case "done":
-              break;
+            switch (event.type) {
+              case "text_delta":
+                turnText += event.content;
+                this.onStreamDelta?.(event.content);
+                break;
+              case "tool_call_start":
+                this.onToolCallStart?.({
+                  id: event.toolCall.id,
+                  name: event.toolCall.name,
+                  input: {},
+                });
+                break;
+              case "tool_call_end":
+                toolCalls.push(event.toolCall);
+                break;
+              case "usage":
+                this.costTracker.recordUsage(this.model, event.usage);
+                this.onUsageUpdate?.(event.usage);
+                break;
+              case "error":
+                throw new Error(event.error);
+              case "done":
+                break;
+            }
           }
+        } catch (error: unknown) {
+          if (this._aborted && isAbortError(error)) {
+            logger.info("Stream cancelled");
+            streamAborted = true;
+          } else {
+            throw error;
+          }
+        } finally {
+          this.activeAbortController = null;
+        }
+
+        if (streamAborted) {
+          break;
         }
 
         this.messageManager.addAssistantMessage(turnText, toolCalls.length > 0 ? toolCalls : undefined);
@@ -179,16 +200,22 @@ export class AgentLoop {
       return fullTextResponse;
     } catch (error: unknown) {
       const wrappedError = error instanceof Error ? error : new Error(String(error));
+      if (this._aborted && isAbortError(wrappedError)) {
+        logger.info("Agent request aborted");
+        return fullTextResponse;
+      }
       logger.error("Agent loop error", wrappedError.message);
       this.onError?.(wrappedError);
       throw wrappedError;
     } finally {
+      this.activeAbortController = null;
       this._isProcessing = false;
     }
   }
 
   abort(): void {
     this._aborted = true;
+    this.activeAbortController?.abort();
   }
 
   isProcessing(): boolean {

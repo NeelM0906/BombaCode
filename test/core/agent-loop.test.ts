@@ -7,6 +7,22 @@ import type { LLMProvider, LLMRequest, LLMResponse, StreamEvent } from "../../sr
 class FakeProvider implements LLMProvider {
   name = "fake";
 
+  supportsTools(): boolean {
+    return true;
+  }
+
+  supportsThinking(): boolean {
+    return false;
+  }
+
+  supportsCaching(): boolean {
+    return false;
+  }
+
+  estimateTokens(text: string): number {
+    return Math.max(1, Math.ceil(text.length / 4));
+  }
+
   async createMessage(_request: LLMRequest): Promise<LLMResponse> {
     return {
       content: "hello",
