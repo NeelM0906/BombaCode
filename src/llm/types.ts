@@ -24,6 +24,12 @@ export interface ToolDefinition {
   inputSchema: Record<string, unknown>;
 }
 
+export interface ToolResult {
+  toolUseId: string;
+  content: string;
+  isError: boolean;
+}
+
 // ─── LLM Request / Response ───
 
 export interface LLMRequest {
