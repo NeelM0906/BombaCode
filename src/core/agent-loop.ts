@@ -79,6 +79,7 @@ export class AgentLoop {
     try {
       this.messageManager.addUserMessage(input);
       let turnCount = 0;
+      let consecutiveMaxTokenStops = 0;
 
       while (true) {
         if (this._aborted) {
@@ -169,17 +170,23 @@ export class AgentLoop {
         fullTextResponse += turnText;
 
         if (lastStopReason === "max_tokens") {
+          consecutiveMaxTokenStops += 1;
           logger.warn("Model hit max_tokens, compacting context and retrying turn");
-          if (this.contextManager) {
+          if (this.contextManager && consecutiveMaxTokenStops <= 1) {
             await this.contextManager.compact();
             this.onStreamEnd?.(turnText);
             fullTextResponse += "\n";
             continue;
           }
 
+          const note =
+            "\n\n[Model reached max_tokens repeatedly after compaction. Stopping to avoid an infinite retry loop.]";
+          fullTextResponse += note;
           this.onStreamEnd?.(fullTextResponse);
           break;
         }
+
+        consecutiveMaxTokenStops = 0;
 
         const shouldExecuteTools = lastStopReason === "tool_use" || toolCalls.length > 0;
         if (!shouldExecuteTools) {

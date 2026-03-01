@@ -35,9 +35,9 @@ class ThrowTool extends BaseTool {
 class MockProvider implements LLMProvider {
   name = "mock";
   calls = 0;
-  mode: "normal" | "infinite" | "error" | "max_tokens";
+  mode: "normal" | "infinite" | "error" | "max_tokens" | "max_tokens_forever";
 
-  constructor(mode: "normal" | "infinite" | "error" | "max_tokens") {
+  constructor(mode: "normal" | "infinite" | "error" | "max_tokens" | "max_tokens_forever") {
     this.mode = mode;
   }
 
@@ -102,6 +102,12 @@ class MockProvider implements LLMProvider {
 
       yield { type: "text_delta", content: "Completed after compaction." };
       yield { type: "done", stopReason: "end_turn" };
+      return;
+    }
+
+    if (this.mode === "max_tokens_forever") {
+      yield { type: "text_delta", content: "Still too long..." };
+      yield { type: "done", stopReason: "max_tokens" };
       return;
     }
 
@@ -213,5 +219,22 @@ describe("AgentLoop tool integration", () => {
     expect(compact).toHaveBeenCalledTimes(1);
     expect(provider.calls).toBe(2);
     expect(response).toContain("Completed after compaction");
+  });
+
+  it("stops after repeated max_tokens to prevent infinite retry loops", async () => {
+    const provider = new MockProvider("max_tokens_forever");
+    const registry = new ToolRegistry();
+    registry.register(new ReadFixtureTool());
+
+    const ensureWithinBudget = vi.fn().mockResolvedValue(undefined);
+    const compact = vi.fn().mockResolvedValue(undefined);
+    const contextManager = { ensureWithinBudget, compact } as unknown as ContextManager;
+
+    const loop = buildLoop(provider, registry, 25, contextManager);
+    const response = await loop.processUserInput("trigger repeated max tokens");
+
+    expect(compact).toHaveBeenCalledTimes(1);
+    expect(provider.calls).toBe(2);
+    expect(response).toContain("Stopping to avoid an infinite retry loop");
   });
 });
