@@ -85,7 +85,7 @@ export class SlashCommandRegistry {
       }
     }
 
-    return results;
+    return results.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   isSlashCommand(input: string): boolean {

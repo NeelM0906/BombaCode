@@ -79,7 +79,7 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
   const permissionManagerRef = useRef<PermissionManager | null>(null);
   const toolRegistryRef = useRef<ToolRegistry | null>(null);
   const toolRouterRef = useRef<ToolRouter | null>(null);
-  const commandRegistryRef = useRef<SlashCommandRegistry>(new SlashCommandRegistry());
+  const commandRegistryRef = useRef<SlashCommandRegistry | null>(null);
   const agentLoopRef = useRef<AgentLoop | null>(null);
   const permissionResolverRef = useRef<((decision: PermissionDecision) => void) | null>(null);
   const submittedInitialPromptRef = useRef<string | undefined>(undefined);
@@ -396,6 +396,7 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
   );
 
   const handleSlashCommand = useCallback(async (input: string) => {
+    if (!commandRegistryRef.current) return;
     const handled = await commandRegistryRef.current.execute(input);
     if (!handled) {
       const unknown = input.trim().split(/\s+/, 1)[0] ?? input.trim();
@@ -487,7 +488,7 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
         <InputBar
           onSubmit={handleSubmit}
           onSlashCommand={handleSlashCommand}
-          commandRegistry={commandRegistryRef.current}
+          commandRegistry={commandRegistryRef.current ?? undefined}
           loading={isLoading}
           isFocused={!permissionRequest}
         />

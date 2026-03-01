@@ -19,7 +19,25 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
 
   const visibleCount = Math.max(1, maxVisible);
   const boundedSelectedIndex = Math.max(0, Math.min(selectedIndex, commands.length - 1));
-  const windowStart = Math.max(0, boundedSelectedIndex - visibleCount + 1);
+
+  // Keep a margin of 1 item above and below the selection when possible
+  const margin = 1;
+  let windowStart: number;
+
+  if (boundedSelectedIndex < margin) {
+    // Near the top — pin to start
+    windowStart = 0;
+  } else if (boundedSelectedIndex >= commands.length - margin) {
+    // Near the bottom — pin to end
+    windowStart = Math.max(0, commands.length - visibleCount);
+  } else {
+    // Keep selection centered-ish with margin
+    windowStart = Math.max(0, Math.min(
+      boundedSelectedIndex - margin,
+      commands.length - visibleCount
+    ));
+  }
+
   const windowEnd = Math.min(commands.length, windowStart + visibleCount);
   const visibleCommands = commands.slice(windowStart, windowEnd);
 
