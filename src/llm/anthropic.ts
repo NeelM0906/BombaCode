@@ -148,6 +148,7 @@ export class AnthropicProvider implements LLMProvider {
     let currentToolId = "";
     let currentToolName = "";
     let currentToolArgs = "";
+    let stopReason: "end_turn" | "tool_use" | "max_tokens" = "end_turn";
 
     for await (const event of withCancellation(stream, request.abortSignal)) {
       if (event.type === "content_block_start") {
@@ -182,6 +183,15 @@ export class AnthropicProvider implements LLMProvider {
           currentToolName = "";
           currentToolArgs = "";
         }
+      } else if (event.type === "message_delta") {
+        const reason = (event.delta as { stop_reason?: string | null }).stop_reason;
+        if (reason === "tool_use") {
+          stopReason = "tool_use";
+        } else if (reason === "max_tokens") {
+          stopReason = "max_tokens";
+        } else if (reason === "end_turn") {
+          stopReason = "end_turn";
+        }
       }
     }
 
@@ -200,6 +210,14 @@ export class AnthropicProvider implements LLMProvider {
       return;
     }
 
+    if (finalMessage.stop_reason === "tool_use") {
+      stopReason = "tool_use";
+    } else if (finalMessage.stop_reason === "max_tokens") {
+      stopReason = "max_tokens";
+    } else if (finalMessage.stop_reason === "end_turn") {
+      stopReason = "end_turn";
+    }
+
     yield {
       type: "usage",
       usage: {
@@ -210,7 +228,7 @@ export class AnthropicProvider implements LLMProvider {
       },
     };
 
-    yield { type: "done" };
+    yield { type: "done", stopReason };
   }
 
   getMaxContextTokens(model: string): number {

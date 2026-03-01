@@ -174,7 +174,7 @@ describe("OpenRouterProvider", () => {
       type: "usage",
       usage: { inputTokens: 50, outputTokens: 10 },
     });
-    expect(events[events.length - 1]).toEqual({ type: "done" });
+    expect(events[events.length - 1]).toEqual({ type: "done", stopReason: "tool_use" });
   });
 
   it("exposes provider capabilities", () => {

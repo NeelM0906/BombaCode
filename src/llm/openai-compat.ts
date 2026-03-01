@@ -122,9 +122,15 @@ export class OpenAICompatProvider implements LLMProvider {
 
     const pendingToolCalls = new Map<number, { id: string; name: string; args: string; started: boolean }>();
     let usageEmitted = false;
+    let stopReason: "end_turn" | "tool_use" | "max_tokens" = "end_turn";
+    let sawToolCalls = false;
 
     for await (const chunk of withCancellation(stream, request.abortSignal)) {
       const delta = chunk.choices[0]?.delta;
+      const finishReason = chunk.choices[0]?.finish_reason;
+      if (finishReason) {
+        stopReason = this.mapFinishReason(finishReason);
+      }
 
       if (delta?.content) {
         yield { type: "text_delta", content: delta.content };
@@ -169,6 +175,7 @@ export class OpenAICompatProvider implements LLMProvider {
 
           if (toolCallChunk.function?.arguments) {
             pending.args += toolCallChunk.function.arguments;
+            sawToolCalls = true;
             yield {
               type: "tool_call_delta",
               content: toolCallChunk.function.arguments,
@@ -199,6 +206,7 @@ export class OpenAICompatProvider implements LLMProvider {
           },
         };
       }
+      sawToolCalls = true;
 
       yield {
         type: "tool_call_end",
@@ -210,7 +218,11 @@ export class OpenAICompatProvider implements LLMProvider {
       };
     }
 
-    yield { type: "done" };
+    if (stopReason === "end_turn" && sawToolCalls) {
+      stopReason = "tool_use";
+    }
+
+    yield { type: "done", stopReason };
   }
 
   getMaxContextTokens(model: string): number {
@@ -281,6 +293,18 @@ export class OpenAICompatProvider implements LLMProvider {
 
   private stripProviderPrefix(model: string): string {
     return model.includes("/") ? model.split("/").pop() ?? model : model;
+  }
+
+  private mapFinishReason(
+    finishReason: string
+  ): "end_turn" | "tool_use" | "max_tokens" {
+    if (finishReason === "tool_calls") {
+      return "tool_use";
+    }
+    if (finishReason === "length") {
+      return "max_tokens";
+    }
+    return "end_turn";
   }
 
 }

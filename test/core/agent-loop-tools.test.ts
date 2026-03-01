@@ -73,12 +73,12 @@ class MockProvider implements LLMProvider {
         yield { type: "text_delta", content: "I will read the file." };
         yield { type: "tool_call_start", toolCall: { id: "tc_1", name: "read" } };
         yield { type: "tool_call_end", toolCall: { id: "tc_1", name: "read", input: { file_path: "x" } } };
-        yield { type: "done" };
+        yield { type: "done", stopReason: "tool_use" };
         return;
       }
 
       yield { type: "text_delta", content: "Read complete." };
-      yield { type: "done" };
+      yield { type: "done", stopReason: "end_turn" };
       return;
     }
 
@@ -88,19 +88,19 @@ class MockProvider implements LLMProvider {
         type: "tool_call_end",
         toolCall: { id: `tc_${this.calls}`, name: "read", input: { file_path: "x" } },
       };
-      yield { type: "done" };
+      yield { type: "done", stopReason: "tool_use" };
       return;
     }
 
     if (this.calls === 1) {
       yield { type: "tool_call_start", toolCall: { id: "tc_err", name: "throw_tool" } };
       yield { type: "tool_call_end", toolCall: { id: "tc_err", name: "throw_tool", input: {} } };
-      yield { type: "done" };
+      yield { type: "done", stopReason: "tool_use" };
       return;
     }
 
     yield { type: "text_delta", content: "Handled tool failure." };
-    yield { type: "done" };
+    yield { type: "done", stopReason: "end_turn" };
   }
 
   getMaxContextTokens(): number {

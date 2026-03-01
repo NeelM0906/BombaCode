@@ -35,7 +35,7 @@ class FakeProvider implements LLMProvider {
   async *streamMessage(_request: LLMRequest): AsyncGenerator<StreamEvent> {
     yield { type: "text_delta", content: "hello" };
     yield { type: "usage", usage: { inputTokens: 10, outputTokens: 5 } };
-    yield { type: "done" };
+    yield { type: "done", stopReason: "end_turn" };
   }
 
   getMaxContextTokens(): number {

@@ -138,9 +138,15 @@ export class OpenRouterProvider implements LLMProvider {
 
     // Track tool calls being assembled across chunks
     const pendingToolCalls: Map<number, { id: string; name: string; args: string; started: boolean }> = new Map();
+    let stopReason: "end_turn" | "tool_use" | "max_tokens" = "end_turn";
+    let sawToolCalls = false;
 
     for await (const chunk of withCancellation(stream, request.abortSignal)) {
       const delta = chunk.choices[0]?.delta;
+      const finishReason = chunk.choices[0]?.finish_reason;
+      if (finishReason) {
+        stopReason = this.mapFinishReason(finishReason);
+      }
 
       // Text content
       if (delta?.content) {
@@ -169,6 +175,7 @@ export class OpenRouterProvider implements LLMProvider {
           if (tc.function?.arguments) {
             pending.args += tc.function.arguments;
             yield { type: "tool_call_delta", content: tc.function.arguments };
+            sawToolCalls = true;
           }
         }
       }
@@ -190,6 +197,7 @@ export class OpenRouterProvider implements LLMProvider {
       if (!pending.started && pending.id && pending.name) {
         yield { type: "tool_call_start", toolCall: { id: pending.id, name: pending.name } };
       }
+      sawToolCalls = true;
       yield {
         type: "tool_call_end",
         toolCall: {
@@ -200,7 +208,11 @@ export class OpenRouterProvider implements LLMProvider {
       };
     }
 
-    yield { type: "done" };
+    if (stopReason === "end_turn" && sawToolCalls) {
+      stopReason = "tool_use";
+    }
+
+    yield { type: "done", stopReason };
   }
 
   getMaxContextTokens(model: string): number {
@@ -245,6 +257,18 @@ export class OpenRouterProvider implements LLMProvider {
     }
 
     return msgs;
+  }
+
+  private mapFinishReason(
+    finishReason: string
+  ): "end_turn" | "tool_use" | "max_tokens" {
+    if (finishReason === "tool_calls") {
+      return "tool_use";
+    }
+    if (finishReason === "length") {
+      return "max_tokens";
+    }
+    return "end_turn";
   }
 
 }

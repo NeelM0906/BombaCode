@@ -106,6 +106,7 @@ export class AgentLoop {
         let turnText = "";
         const toolCalls: ToolCall[] = [];
         let streamAborted = false;
+        let lastStopReason: "end_turn" | "tool_use" | "max_tokens" = "end_turn";
 
         try {
           for await (const event of stream) {
@@ -137,6 +138,7 @@ export class AgentLoop {
               case "error":
                 throw new Error(event.error);
               case "done":
+                lastStopReason = event.stopReason;
                 break;
             }
           }
@@ -158,7 +160,8 @@ export class AgentLoop {
         this.messageManager.addAssistantMessage(turnText, toolCalls.length > 0 ? toolCalls : undefined);
         fullTextResponse += turnText;
 
-        if (toolCalls.length === 0) {
+        const shouldExecuteTools = lastStopReason === "tool_use" || toolCalls.length > 0;
+        if (!shouldExecuteTools) {
           this.onStreamEnd?.(fullTextResponse);
           break;
         }

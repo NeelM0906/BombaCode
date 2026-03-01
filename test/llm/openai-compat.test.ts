@@ -182,7 +182,7 @@ describe("OpenAICompatProvider", () => {
       type: "usage",
       usage: { inputTokens: 100, outputTokens: 20 },
     });
-    expect(events[events.length - 1]).toEqual({ type: "done" });
+    expect(events[events.length - 1]).toEqual({ type: "done", stopReason: "tool_use" });
   });
 
   it("exposes provider capability helpers", () => {

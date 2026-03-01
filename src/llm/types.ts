@@ -59,7 +59,7 @@ export type StreamEvent =
   | { type: "tool_call_delta"; content: string }
   | { type: "tool_call_end"; toolCall: ToolCall }
   | { type: "usage"; usage: TokenUsage }
-  | { type: "done" }
+  | { type: "done"; stopReason: "end_turn" | "tool_use" | "max_tokens" }
   | { type: "error"; error: string };
 
 // ─── Token Usage ───

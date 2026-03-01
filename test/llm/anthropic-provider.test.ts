@@ -121,6 +121,7 @@ describe("AnthropicProvider", () => {
             cache_read_input_tokens: 10,
             cache_creation_input_tokens: 12,
           },
+          stop_reason: "tool_use",
         }
       )
     );
@@ -174,7 +175,7 @@ describe("AnthropicProvider", () => {
         cacheWriteTokens: 12,
       },
     });
-    expect(events[events.length - 1]).toEqual({ type: "done" });
+    expect(events[events.length - 1]).toEqual({ type: "done", stopReason: "tool_use" });
   });
 
   it("exposes provider capability helpers", () => {
