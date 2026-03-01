@@ -152,7 +152,7 @@ export class ContextManager {
 
     const preface =
       droppedCount > 0
-        ? `Dropped ${droppedCount} older messages before this summary due context budget.\n\n`
+        ? `Dropped ${droppedCount} older messages before this summary due to context budget.\n\n`
         : "";
 
     try {
