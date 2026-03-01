@@ -53,6 +53,9 @@ export class ContextManager {
       return;
     }
 
+    const beforeMessages = messages.length;
+    const beforeTokens = this.messageManager.getEstimatedTokens();
+
     const pinnedIndices = this.getPinnedIndices(messages.length);
     const recentStart = Math.max(0, messages.length - RECENT_MESSAGE_COUNT);
 
@@ -69,9 +72,9 @@ export class ContextManager {
     this.messageManager.setMessages(compacted);
 
     const budget = this.getAvailableForMessages();
-    const currentTokens = this.messageManager.getEstimatedTokens();
+    const compactedTokens = this.messageManager.getEstimatedTokens();
 
-    if (currentTokens > budget) {
+    if (compactedTokens > budget) {
       const removed = this.messageManager.truncate(budget);
       if (removed.length > 0) {
         logger.info("Truncated messages after compaction", {
@@ -81,11 +84,14 @@ export class ContextManager {
       }
     }
 
+    const afterMessages = this.messageManager.getMessageCount();
+    const afterTokens = this.messageManager.getEstimatedTokens();
+
     logger.info("Context compacted", {
-      beforeMessages: messages.length,
-      afterMessages: this.messageManager.getMessageCount(),
-      beforeTokens: currentTokens,
-      afterTokens: this.messageManager.getEstimatedTokens(),
+      beforeMessages,
+      afterMessages,
+      beforeTokens,
+      afterTokens,
     });
   }
 

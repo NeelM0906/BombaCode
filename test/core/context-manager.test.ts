@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ContextManager } from "../../src/core/context-manager.js";
 import { MessageManager } from "../../src/core/message-manager.js";
 import type { LLMProvider, LLMRequest, LLMResponse, StreamEvent } from "../../src/llm/types.js";
+import { logger } from "../../src/utils/logger.js";
 
 class MockSummaryProvider implements LLMProvider {
   name = "mock-summary";
@@ -153,5 +154,44 @@ describe("ContextManager", () => {
 
     expect(provider.createCalls).toBeGreaterThan(0);
     expect(messageManager.getMessages().some((message) => message.content.includes("[Context summary]:"))).toBe(true);
+  });
+
+  it("logs accurate before and after token snapshots", async () => {
+    const provider = new MockSummaryProvider();
+    const messageManager = new MessageManager();
+    seedConversation(messageManager, 20, 200);
+
+    const contextManager = new ContextManager({
+      provider,
+      messageManager,
+      model: "anthropic/claude-haiku-4-5",
+      maxContextTokens: 1_600,
+      reservedOutputTokens: 300,
+      systemPromptTokens: 100,
+      toolDefinitionTokens: 100,
+      compactThreshold: 0.5,
+    });
+
+    const beforeTokens = messageManager.getEstimatedTokens();
+    const infoSpy = vi.spyOn(logger, "info").mockImplementation(() => {});
+
+    await contextManager.compact();
+
+    const afterTokens = messageManager.getEstimatedTokens();
+    const compactLogCall = infoSpy.mock.calls.find(
+      (call) => call[0] === "Context compacted"
+    );
+
+    expect(compactLogCall).toBeDefined();
+    const payload = compactLogCall?.[1] as
+      | { beforeTokens: number; afterTokens: number; beforeMessages: number; afterMessages: number }
+      | undefined;
+
+    expect(payload?.beforeTokens).toBe(beforeTokens);
+    expect(payload?.afterTokens).toBe(afterTokens);
+    expect(payload?.beforeMessages).toBe(20);
+    expect(payload?.afterMessages).toBe(messageManager.getMessageCount());
+
+    infoSpy.mockRestore();
   });
 });
