@@ -3,6 +3,7 @@ import type { CostTracker } from "../llm/cost-tracker.js";
 import type { MessageManager } from "./message-manager.js";
 import type { ToolRegistry } from "./tool-registry.js";
 import type { ToolRouter } from "./tool-router.js";
+import type { ContextManager } from "./context-manager.js";
 import { logger } from "../utils/logger.js";
 import { isAbortError } from "../llm/streaming.js";
 
@@ -16,6 +17,7 @@ export interface AgentLoopConfig {
   maxTurns?: number;
   toolRegistry?: ToolRegistry;
   toolRouter?: ToolRouter;
+  contextManager?: ContextManager;
   onStreamDelta?: (text: string) => void;
   onStreamEnd?: (fullResponse: string) => void;
   onUsageUpdate?: (usage: TokenUsage) => void;
@@ -30,6 +32,7 @@ export class AgentLoop {
   private readonly costTracker: CostTracker;
   private readonly toolRegistry?: ToolRegistry;
   private readonly toolRouter?: ToolRouter;
+  private readonly contextManager?: ContextManager;
   private model: string;
   private systemPrompt: string;
   private maxTokens: number;
@@ -51,6 +54,7 @@ export class AgentLoop {
     this.costTracker = config.costTracker;
     this.toolRegistry = config.toolRegistry;
     this.toolRouter = config.toolRouter;
+    this.contextManager = config.contextManager;
     this.model = config.model;
     this.systemPrompt = config.systemPrompt ?? "";
     this.maxTokens = config.maxTokens ?? 4096;
@@ -90,6 +94,10 @@ export class AgentLoop {
         }
 
         turnCount += 1;
+
+        if (this.contextManager) {
+          await this.contextManager.ensureWithinBudget();
+        }
 
         const requestTools = this.toolRegistry?.getToolDefinitions() ?? [];
 
@@ -159,6 +167,19 @@ export class AgentLoop {
 
         this.messageManager.addAssistantMessage(turnText, toolCalls.length > 0 ? toolCalls : undefined);
         fullTextResponse += turnText;
+
+        if (lastStopReason === "max_tokens") {
+          logger.warn("Model hit max_tokens, compacting context and retrying turn");
+          if (this.contextManager) {
+            await this.contextManager.compact();
+            this.onStreamEnd?.(turnText);
+            fullTextResponse += "\n";
+            continue;
+          }
+
+          this.onStreamEnd?.(fullTextResponse);
+          break;
+        }
 
         const shouldExecuteTools = lastStopReason === "tool_use" || toolCalls.length > 0;
         if (!shouldExecuteTools) {

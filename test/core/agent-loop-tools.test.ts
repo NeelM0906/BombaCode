@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AgentLoop } from "../../src/core/agent-loop.js";
 import { MessageManager } from "../../src/core/message-manager.js";
 import { CostTracker } from "../../src/llm/cost-tracker.js";
@@ -8,6 +8,7 @@ import { PermissionManager } from "../../src/core/permission-manager.js";
 import { CheckpointManager } from "../../src/core/checkpoint-manager.js";
 import { BaseTool } from "../../src/tools/base-tool.js";
 import type { LLMProvider, LLMRequest, LLMResponse, StreamEvent } from "../../src/llm/types.js";
+import type { ContextManager } from "../../src/core/context-manager.js";
 
 class ReadFixtureTool extends BaseTool {
   name = "read";
@@ -34,9 +35,9 @@ class ThrowTool extends BaseTool {
 class MockProvider implements LLMProvider {
   name = "mock";
   calls = 0;
-  mode: "normal" | "infinite" | "error";
+  mode: "normal" | "infinite" | "error" | "max_tokens";
 
-  constructor(mode: "normal" | "infinite" | "error") {
+  constructor(mode: "normal" | "infinite" | "error" | "max_tokens") {
     this.mode = mode;
   }
 
@@ -92,6 +93,18 @@ class MockProvider implements LLMProvider {
       return;
     }
 
+    if (this.mode === "max_tokens") {
+      if (this.calls === 1) {
+        yield { type: "text_delta", content: "Partial answer..." };
+        yield { type: "done", stopReason: "max_tokens" };
+        return;
+      }
+
+      yield { type: "text_delta", content: "Completed after compaction." };
+      yield { type: "done", stopReason: "end_turn" };
+      return;
+    }
+
     if (this.calls === 1) {
       yield { type: "tool_call_start", toolCall: { id: "tc_err", name: "throw_tool" } };
       yield { type: "tool_call_end", toolCall: { id: "tc_err", name: "throw_tool", input: {} } };
@@ -108,7 +121,12 @@ class MockProvider implements LLMProvider {
   }
 }
 
-function buildLoop(provider: LLMProvider, registry: ToolRegistry, maxTurns = 25): AgentLoop {
+function buildLoop(
+  provider: LLMProvider,
+  registry: ToolRegistry,
+  maxTurns = 25,
+  contextManager?: ContextManager
+): AgentLoop {
   const router = new ToolRouter({
     registry,
     permissionManager: new PermissionManager("normal"),
@@ -122,6 +140,7 @@ function buildLoop(provider: LLMProvider, registry: ToolRegistry, maxTurns = 25)
     model: "anthropic/claude-sonnet-4-6",
     toolRegistry: registry,
     toolRouter: router,
+    contextManager,
     maxTurns,
   });
 }
@@ -161,5 +180,38 @@ describe("AgentLoop tool integration", () => {
 
     expect(provider.calls).toBe(2);
     expect(response).toContain("Handled tool failure");
+  });
+
+  it("runs context budget check before each turn", async () => {
+    const provider = new MockProvider("normal");
+    const registry = new ToolRegistry();
+    registry.register(new ReadFixtureTool());
+
+    const ensureWithinBudget = vi.fn().mockResolvedValue(undefined);
+    const compact = vi.fn().mockResolvedValue(undefined);
+    const contextManager = { ensureWithinBudget, compact } as unknown as ContextManager;
+
+    const loop = buildLoop(provider, registry, 25, contextManager);
+    await loop.processUserInput("Read fixture");
+
+    expect(ensureWithinBudget).toHaveBeenCalledTimes(2);
+    expect(compact).not.toHaveBeenCalled();
+  });
+
+  it("compacts and retries when stream ends with max_tokens", async () => {
+    const provider = new MockProvider("max_tokens");
+    const registry = new ToolRegistry();
+    registry.register(new ReadFixtureTool());
+
+    const ensureWithinBudget = vi.fn().mockResolvedValue(undefined);
+    const compact = vi.fn().mockResolvedValue(undefined);
+    const contextManager = { ensureWithinBudget, compact } as unknown as ContextManager;
+
+    const loop = buildLoop(provider, registry, 25, contextManager);
+    const response = await loop.processUserInput("trigger max tokens");
+
+    expect(compact).toHaveBeenCalledTimes(1);
+    expect(provider.calls).toBe(2);
+    expect(response).toContain("Completed after compaction");
   });
 });
