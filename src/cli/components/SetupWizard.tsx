@@ -175,7 +175,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
           return;
         }
 
-        if (input && !key.ctrl && !key.meta && input.length === 1) {
+        if (input && !key.ctrl && !key.meta) {
           if (selectedProvider === "openai-compat") {
             setBaseUrl((value) => value + input);
           } else {

@@ -200,7 +200,7 @@ export const InputBar: React.FC<InputBarProps> = ({
         return;
       }
 
-      if (inputChar && !key.ctrl && !key.meta && inputChar.length === 1) {
+      if (inputChar && !key.ctrl && !key.meta) {
         inputActions.insertChar(inputChar);
       }
     },
