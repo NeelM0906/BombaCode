@@ -181,11 +181,7 @@ export const InputBar: React.FC<InputBarProps> = ({
       }
 
       if (key.escape) {
-        if (menuOpen) {
-          closeMenu();
-        } else {
-          inputActions.clear();
-        }
+        inputActions.clear();
         return;
       }
 
@@ -225,7 +221,7 @@ export const InputBar: React.FC<InputBarProps> = ({
     <Box flexDirection="column" paddingX={1}>
       {menuOpen ? <SlashCommandMenu commands={filteredCommands} selectedIndex={selectedIndex} /> : null}
       {inputState.lines.map((line, index) => (
-        <Text key={`${index}-${line}`}>
+        <Text key={index}>
           <Text color="green" bold={index === 0}>
             {index === 0 ? "> " : "  "}
           </Text>
