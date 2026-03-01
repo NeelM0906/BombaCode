@@ -33,6 +33,17 @@ export interface AppProps {
 
 export const CONTINUE_LAST_SESSION = "__continue_last__";
 
+export function shouldAutoSubmitInitialPrompt(
+  initialPrompt: string | undefined,
+  submittedPrompt: string | undefined
+): boolean {
+  if (!initialPrompt || initialPrompt.trim().length === 0) {
+    return false;
+  }
+
+  return initialPrompt !== submittedPrompt;
+}
+
 function parseMode(input: string): PermissionMode | null {
   if (input === "normal" || input === "auto-edit" || input === "yolo" || input === "plan") {
     return input;
@@ -69,6 +80,7 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
   const toolRouterRef = useRef<ToolRouter | null>(null);
   const agentLoopRef = useRef<AgentLoop | null>(null);
   const permissionResolverRef = useRef<((decision: PermissionDecision) => void) | null>(null);
+  const submittedInitialPromptRef = useRef<string | undefined>(undefined);
 
   const activeToolName = useMemo(() => {
     const firstActive = activeToolCalls.values().next().value as ToolCall | undefined;
@@ -323,10 +335,22 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
   );
 
   useEffect(() => {
-    if (initialPrompt && agentLoopRef.current && !isLoading) {
-      void handleSubmit(initialPrompt);
+    if (!agentLoopRef.current) {
+      return;
     }
-  }, [handleSubmit, initialPrompt, isLoading]);
+
+    const promptToSubmit = initialPrompt;
+    if (!promptToSubmit) {
+      return;
+    }
+
+    if (!shouldAutoSubmitInitialPrompt(promptToSubmit, submittedInitialPromptRef.current)) {
+      return;
+    }
+
+    submittedInitialPromptRef.current = promptToSubmit;
+    void handleSubmit(promptToSubmit);
+  }, [handleSubmit, initialPrompt]);
 
   useInput((inputChar, key) => {
     if (key.ctrl && inputChar === "c") {
