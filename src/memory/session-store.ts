@@ -36,6 +36,14 @@ export class SessionStore {
   }
 
   getById(id: string): SessionRecord | undefined {
-    return this.getAll().find((session) => session.id === id);
+    const all = this.getAll();
+    for (let index = all.length - 1; index >= 0; index -= 1) {
+      const session = all[index];
+      if (session?.id === id) {
+        return session;
+      }
+    }
+
+    return undefined;
   }
 }
