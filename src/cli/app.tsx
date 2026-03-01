@@ -375,7 +375,7 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
 
       {messages.length === 0 && !isLoading ? (
         <Box flexDirection="column" marginTop={1} paddingX={1}>
-          <Text color="green">BombaCode v0.2.0 — ready. Type a message to begin.</Text>
+          <Text color="green">BombaCode v0.1.0 — ready. Type a message to begin.</Text>
           <Text dimColor>Working directory: {process.cwd()}</Text>
           {resumeId ? (
             <Text dimColor>
