@@ -2,9 +2,8 @@ import { spawnSync } from "node:child_process";
 import { Command } from "commander";
 import { render } from "ink";
 import React from "react";
-import { App } from "./cli/app.js";
+import { App, CONTINUE_LAST_SESSION } from "./cli/app.js";
 import { SetupWizard } from "./cli/components/SetupWizard.js";
-import { SessionManager } from "./core/session-manager.js";
 import { getConfigPath, hasApiKey, loadSettings, saveSettings } from "./memory/settings.js";
 import { logger } from "./utils/logger.js";
 import type { Settings } from "./memory/settings.js";
@@ -129,24 +128,7 @@ program
       return;
     }
 
-    const sessionManager = new SessionManager();
-    let resumeId: string | undefined;
-
-    if (options.resume) {
-      const resumeSession = sessionManager.getById(options.resume);
-      if (!resumeSession) {
-        console.error(`Session not found: ${options.resume}`);
-        process.exit(1);
-      }
-      resumeId = resumeSession.id;
-    } else if (options.continue) {
-      const lastSession = sessionManager.getLast();
-      if (!lastSession) {
-        console.error("No previous sessions found.");
-        process.exit(1);
-      }
-      resumeId = lastSession.id;
-    }
+    const resumeId = options.resume ? options.resume : options.continue ? CONTINUE_LAST_SESSION : undefined;
 
     const initialPrompt = promptWords.length > 0 ? promptWords.join(" ") : undefined;
     launchApp(settings, initialPrompt, resumeId);

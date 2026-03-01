@@ -7,6 +7,8 @@ import { PermissionPrompt } from "./components/PermissionPrompt.js";
 import type { PermissionPromptDecision } from "./components/PermissionPrompt.js";
 import { AgentLoop } from "../core/agent-loop.js";
 import { MessageManager } from "../core/message-manager.js";
+import { ContextManager } from "../core/context-manager.js";
+import { SessionManager } from "../core/session-manager.js";
 import { CostTracker } from "../llm/cost-tracker.js";
 import { createProvider } from "../llm/provider-factory.js";
 import { buildSystemPrompt } from "../core/system-prompt.js";
@@ -28,6 +30,8 @@ export interface AppProps {
   initialPrompt?: string;
   resumeId?: string;
 }
+
+export const CONTINUE_LAST_SESSION = "__continue_last__";
 
 function parseMode(input: string): PermissionMode | null {
   if (input === "normal" || input === "auto-edit" || input === "yolo" || input === "plan") {
@@ -56,6 +60,8 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
   const [permissionRequest, setPermissionRequest] = useState<ToolCall | null>(null);
 
   const messageManagerRef = useRef<MessageManager>(new MessageManager());
+  const contextManagerRef = useRef<ContextManager | null>(null);
+  const sessionManagerRef = useRef<SessionManager>(new SessionManager());
   const costTrackerRef = useRef<CostTracker>(new CostTracker());
   const checkpointManagerRef = useRef<CheckpointManager>(new CheckpointManager());
   const permissionManagerRef = useRef<PermissionManager | null>(null);
@@ -108,6 +114,39 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
       registerBuiltinTools(registry, process.cwd());
       toolRegistryRef.current = registry;
 
+      const contextManager = new ContextManager({
+        provider,
+        messageManager: messageManagerRef.current,
+        model: settings.models.fast,
+        maxContextTokens: provider.getMaxContextTokens(settings.defaultModel),
+        reservedOutputTokens: 40_000,
+        systemPromptTokens: provider.estimateTokens(systemPrompt),
+        toolDefinitionTokens: provider.estimateTokens(JSON.stringify(registry.getToolDefinitions())),
+        compactThreshold: settings.autoCompactAt,
+      });
+      contextManagerRef.current = contextManager;
+
+      if (resumeId) {
+        const resumedMessages =
+          resumeId === CONTINUE_LAST_SESSION
+            ? sessionManagerRef.current.continueLast()
+            : sessionManagerRef.current.resume(resumeId);
+
+        if (resumedMessages && resumedMessages.length > 0) {
+          messageManagerRef.current.setMessages(resumedMessages);
+          setMessages([...resumedMessages]);
+          setNotice(
+            `Resumed session ${sessionManagerRef.current.getCurrentId()} with ${resumedMessages.length} messages.`
+          );
+        } else {
+          setNotice(
+            resumeId === CONTINUE_LAST_SESSION
+              ? "No previous session found to continue."
+              : `Session not found: ${resumeId}`
+          );
+        }
+      }
+
       const manager = new PermissionManager(
         settings.permissions.mode ?? "normal",
         settings.permissions.customRules ?? []
@@ -146,11 +185,13 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
         maxTurns: 25,
         toolRegistry: registry,
         toolRouter,
+        contextManager,
         onStreamDelta: (text) => {
           setStreamingText((prev) => (prev ?? "") + text);
         },
         onStreamEnd: () => {
           setStreamingText(undefined);
+          sessionManagerRef.current.save(messageManagerRef.current.getMessages());
           setMessages([...messageManagerRef.current.getMessages()]);
           setTotalTokens(costTrackerRef.current.getTotalTokens());
           setTotalCost(costTrackerRef.current.getSessionCost());
@@ -312,7 +353,11 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
         <Box flexDirection="column" marginTop={1} paddingX={1}>
           <Text color="green">BombaCode v0.2.0 — ready. Type a message to begin.</Text>
           <Text dimColor>Working directory: {process.cwd()}</Text>
-          {resumeId ? <Text dimColor>Resuming session: {resumeId}</Text> : null}
+          {resumeId ? (
+            <Text dimColor>
+              Resuming session: {resumeId === CONTINUE_LAST_SESSION ? "last session" : resumeId}
+            </Text>
+          ) : null}
           <Text dimColor>Commands: /clear, /cost, /tools, /undo, /mode &lt;mode&gt;, /exit</Text>
           <Text dimColor>Permission mode: {permissionMode}</Text>
         </Box>
