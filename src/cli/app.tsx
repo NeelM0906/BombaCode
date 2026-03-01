@@ -5,6 +5,7 @@ import { InputBar } from "./components/InputBar.js";
 import { MessageList } from "./components/MessageList.js";
 import { PermissionPrompt } from "./components/PermissionPrompt.js";
 import type { PermissionPromptDecision } from "./components/PermissionPrompt.js";
+import { SlashCommandRegistry } from "./command-registry.js";
 import { AgentLoop } from "../core/agent-loop.js";
 import { MessageManager } from "../core/message-manager.js";
 import { ContextManager } from "../core/context-manager.js";
@@ -78,6 +79,7 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
   const permissionManagerRef = useRef<PermissionManager | null>(null);
   const toolRegistryRef = useRef<ToolRegistry | null>(null);
   const toolRouterRef = useRef<ToolRouter | null>(null);
+  const commandRegistryRef = useRef<SlashCommandRegistry>(new SlashCommandRegistry());
   const agentLoopRef = useRef<AgentLoop | null>(null);
   const permissionResolverRef = useRef<((decision: PermissionDecision) => void) | null>(null);
   const submittedInitialPromptRef = useRef<string | undefined>(undefined);
@@ -158,6 +160,113 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
           );
         }
       }
+
+      const commandRegistry = new SlashCommandRegistry();
+      commandRegistry.register({
+        name: "help",
+        description: "Show available commands",
+        argHint: "",
+        aliases: [],
+        handler: () => {
+          const lines = commandRegistry
+            .getAll()
+            .map((command) => {
+              const usage = command.argHint ? `/${command.name} ${command.argHint}` : `/${command.name}`;
+              return `${usage} - ${command.description}`;
+            });
+          lines.push("Shortcuts: Shift+Enter or Ctrl+J for newline.");
+          setNotice(lines.join("\n"));
+          setError(undefined);
+        },
+      });
+      commandRegistry.register({
+        name: "clear",
+        description: "Clear conversation",
+        argHint: "",
+        aliases: [],
+        handler: () => {
+          messageManagerRef.current.clear();
+          costTrackerRef.current.reset();
+          setMessages([]);
+          setTotalTokens(0);
+          setTotalCost(0);
+          setError(undefined);
+          setNotice("Cleared conversation state.");
+          setToolResults(new Map());
+          setActiveToolCalls(new Map());
+        },
+      });
+      commandRegistry.register({
+        name: "cost",
+        description: "Show session cost",
+        argHint: "",
+        aliases: [],
+        handler: () => {
+          const tracker = costTrackerRef.current;
+          setNotice(
+            `Session: ${tracker.getTotalTokens().toLocaleString()} tokens | $${tracker
+              .getSessionCost()
+              .toFixed(4)} | ${tracker.getTurnCount()} turns`
+          );
+          setError(undefined);
+        },
+      });
+      commandRegistry.register({
+        name: "undo",
+        description: "Restore last checkpoint",
+        argHint: "",
+        aliases: [],
+        handler: async () => {
+          const undoResult = await checkpointManagerRef.current.undo();
+          if (!undoResult) {
+            setNotice("No checkpoint available to undo.");
+          } else {
+            setNotice(`Restored: ${undoResult.filePath}`);
+          }
+          setError(undefined);
+        },
+      });
+      commandRegistry.register({
+        name: "tools",
+        description: "List available tools",
+        argHint: "",
+        aliases: [],
+        handler: () => {
+          const toolNames = toolRegistryRef.current?.getToolNames() ?? [];
+          setNotice(`Tools: ${toolNames.join(", ")}`);
+          setError(undefined);
+        },
+      });
+      commandRegistry.register({
+        name: "mode",
+        description: "Set permission mode",
+        argHint: "<normal|auto-edit|yolo|plan>",
+        aliases: [],
+        handler: (input) => {
+          const requestedMode = input.trim().split(/\s+/)[1];
+          const parsed = parseMode(requestedMode ?? "");
+
+          if (!parsed) {
+            setError("Invalid mode. Use: /mode normal|auto-edit|yolo|plan");
+            return;
+          }
+
+          permissionManagerRef.current?.setMode(parsed);
+          setPermissionMode(parsed);
+          setNotice(`Permission mode set to ${parsed}.`);
+          setError(undefined);
+        },
+      });
+      commandRegistry.register({
+        name: "exit",
+        description: "Exit BombaCode",
+        argHint: "",
+        aliases: ["quit"],
+        handler: () => {
+          exit();
+        },
+      });
+      commandRegistryRef.current = commandRegistry;
 
       const manager = new PermissionManager(
         settings.permissions.mode ?? "normal",
@@ -246,7 +355,7 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
       setError(`Failed to initialize: ${message}`);
       logger.error("Failed to initialize app", message);
     }
-  }, [requestPermission, settings]);
+  }, [exit, requestPermission, settings]);
 
   const handleSubmit = useCallback(
     async (input: string) => {
@@ -254,62 +363,14 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
         return;
       }
 
-      if (input === "/exit" || input === "/quit") {
-        exit();
-        return;
-      }
-
-      if (input === "/clear") {
-        messageManagerRef.current.clear();
-        costTrackerRef.current.reset();
-        setMessages([]);
-        setTotalTokens(0);
-        setTotalCost(0);
-        setError(undefined);
-        setNotice("Cleared conversation state.");
-        setToolResults(new Map());
-        setActiveToolCalls(new Map());
-        return;
-      }
-
-      if (input === "/cost") {
-        const tracker = costTrackerRef.current;
-        setNotice(
-          `Session: ${tracker.getTotalTokens().toLocaleString()} tokens | $${tracker
-            .getSessionCost()
-            .toFixed(4)} | ${tracker.getTurnCount()} turns`
-        );
-        return;
-      }
-
-      if (input === "/undo") {
-        const undoResult = await checkpointManagerRef.current.undo();
-        if (!undoResult) {
-          setNotice("No checkpoint available to undo.");
-        } else {
-          setNotice(`Restored: ${undoResult.filePath}`);
-        }
-        return;
-      }
-
-      if (input === "/tools") {
-        const toolNames = toolRegistryRef.current?.getToolNames() ?? [];
-        setNotice(`Tools: ${toolNames.join(", ")}`);
-        return;
-      }
-
-      if (input.startsWith("/mode")) {
-        const requestedMode = input.split(/\s+/)[1];
-        const parsed = parseMode(requestedMode ?? "");
-
-        if (!parsed) {
-          setError("Invalid mode. Use: /mode normal|auto-edit|yolo|plan");
+      if (input.startsWith("/") && commandRegistryRef.current) {
+        const handled = await commandRegistryRef.current.execute(input);
+        if (handled) {
           return;
         }
 
-        permissionManagerRef.current?.setMode(parsed);
-        setPermissionMode(parsed);
-        setNotice(`Permission mode set to ${parsed}.`);
+        const unknown = input.trim().split(/\s+/, 1)[0] ?? input.trim();
+        setError(`Unknown command: ${unknown}. Type /help for available commands.`);
         return;
       }
 
@@ -331,8 +392,16 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
         setMessages([...messageManagerRef.current.getMessages()]);
       }
     },
-    [exit, isLoading]
+    [isLoading]
   );
+
+  const handleSlashCommand = useCallback(async (input: string) => {
+    const handled = await commandRegistryRef.current.execute(input);
+    if (!handled) {
+      const unknown = input.trim().split(/\s+/, 1)[0] ?? input.trim();
+      setError(`Unknown command: ${unknown}. Type /help for available commands.`);
+    }
+  }, []);
 
   useEffect(() => {
     if (!agentLoopRef.current) {
@@ -382,7 +451,7 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
               Resuming session: {resumeId === CONTINUE_LAST_SESSION ? "last session" : resumeId}
             </Text>
           ) : null}
-          <Text dimColor>Commands: /clear, /cost, /tools, /undo, /mode &lt;mode&gt;, /exit</Text>
+          <Text dimColor>Type /help for available commands. Shift+Enter or Ctrl+J for newline.</Text>
           <Text dimColor>Permission mode: {permissionMode}</Text>
         </Box>
       ) : null}
@@ -415,7 +484,13 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
       </Box>
 
       <Box marginTop={1}>
-        <InputBar onSubmit={handleSubmit} loading={isLoading} />
+        <InputBar
+          onSubmit={handleSubmit}
+          onSlashCommand={handleSlashCommand}
+          commandRegistry={commandRegistryRef.current}
+          loading={isLoading}
+          isFocused={!permissionRequest}
+        />
       </Box>
     </Box>
   );
