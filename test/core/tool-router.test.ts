@@ -6,6 +6,11 @@ import { ToolRouter } from "../../src/core/tool-router.js";
 import { PermissionManager } from "../../src/core/permission-manager.js";
 import { CheckpointManager } from "../../src/core/checkpoint-manager.js";
 import { BaseTool } from "../../src/tools/base-tool.js";
+import type { ToolInput } from "../../src/tools/base-tool.js";
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 class ReadLikeTool extends BaseTool {
   name = "dummy_read";
@@ -37,6 +42,67 @@ class WriteLikeTool extends BaseTool {
 
   async run() {
     return { content: "write done", isError: false };
+  }
+}
+
+class ConcurrencyProbeReadTool extends BaseTool {
+  name = "probe_read";
+  description = "probe readonly concurrency";
+  category = "readonly" as const;
+  inputSchema = { type: "object", properties: { delayMs: { type: "number" } } };
+
+  constructor(private readonly state: { active: number; maxActive: number }) {
+    super();
+  }
+
+  async run(input: ToolInput) {
+    this.state.active += 1;
+    this.state.maxActive = Math.max(this.state.maxActive, this.state.active);
+
+    const delayMs = typeof input.delayMs === "number" ? input.delayMs : 0;
+    await sleep(delayMs);
+
+    this.state.active -= 1;
+    return { content: `delayed ${delayMs}`, isError: false };
+  }
+}
+
+class ConcurrencyProbeWriteTool extends BaseTool {
+  name = "probe_write";
+  description = "probe write concurrency";
+  category = "write" as const;
+  inputSchema = { type: "object", properties: { delayMs: { type: "number" } } };
+
+  constructor(private readonly state: { active: number; maxActive: number }) {
+    super();
+  }
+
+  async run(input: ToolInput) {
+    this.state.active += 1;
+    this.state.maxActive = Math.max(this.state.maxActive, this.state.active);
+
+    const delayMs = typeof input.delayMs === "number" ? input.delayMs : 0;
+    await sleep(delayMs);
+
+    this.state.active -= 1;
+    return { content: `delayed ${delayMs}`, isError: false };
+  }
+}
+
+class OutputTool extends BaseTool {
+  name = "output";
+  description = "returns provided content";
+  category = "readonly" as const;
+  inputSchema = {
+    type: "object",
+    properties: {
+      content: { type: "string" },
+    },
+  };
+
+  async run(input: ToolInput) {
+    const content = typeof input.content === "string" ? input.content : "";
+    return { content, isError: false };
   }
 }
 
@@ -115,7 +181,7 @@ describe("ToolRouter", () => {
 
       const router = new ToolRouter({
         registry,
-        permissionManager: new PermissionManager("normal"),
+        permissionManager: new PermissionManager("yolo"),
         checkpointManager,
       });
 
@@ -125,5 +191,85 @@ describe("ToolRouter", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it("executes readonly tool calls in parallel", async () => {
+    const state = { active: 0, maxActive: 0 };
+    const registry = new ToolRegistry();
+    registry.register(new ConcurrencyProbeReadTool(state));
+
+    const router = new ToolRouter({
+      registry,
+      permissionManager: new PermissionManager("yolo"),
+      checkpointManager: new CheckpointManager(),
+    });
+
+    const start = Date.now();
+    await router.executeToolCalls([
+      { id: "1", name: "probe_read", input: { delayMs: 120 } },
+      { id: "2", name: "probe_read", input: { delayMs: 120 } },
+    ]);
+    const duration = Date.now() - start;
+
+    expect(state.maxActive).toBeGreaterThan(1);
+    expect(duration).toBeLessThan(220);
+  });
+
+  it("executes write tool calls sequentially", async () => {
+    const state = { active: 0, maxActive: 0 };
+    const registry = new ToolRegistry();
+    registry.register(new ConcurrencyProbeWriteTool(state));
+
+    const router = new ToolRouter({
+      registry,
+      permissionManager: new PermissionManager("yolo"),
+      checkpointManager: new CheckpointManager(),
+    });
+
+    await router.executeToolCalls([
+      { id: "1", name: "probe_write", input: { delayMs: 60 } },
+      { id: "2", name: "probe_write", input: { delayMs: 60 } },
+    ]);
+
+    expect(state.maxActive).toBe(1);
+  });
+
+  it("applies medium-tier truncation for moderate outputs", async () => {
+    const registry = new ToolRegistry();
+    registry.register(new OutputTool());
+
+    const router = new ToolRouter({
+      registry,
+      permissionManager: new PermissionManager("normal"),
+      checkpointManager: new CheckpointManager(),
+    });
+
+    const mediumOutput = Array.from({ length: 700 }, (_, index) => `medium_token_${index}`).join(" ");
+    const [result] = await router.executeToolCalls([
+      { id: "1", name: "output", input: { content: mediumOutput } },
+    ]);
+
+    expect(result?.content.length).toBeLessThan(mediumOutput.length);
+    expect(result?.content).toContain("... [truncated");
+  });
+
+  it("applies large-tier head-tail formatting for very large outputs", async () => {
+    const registry = new ToolRegistry();
+    registry.register(new OutputTool());
+
+    const router = new ToolRouter({
+      registry,
+      permissionManager: new PermissionManager("normal"),
+      checkpointManager: new CheckpointManager(),
+    });
+
+    const largeOutput = Array.from({ length: 3_500 }, (_, index) => `large_token_${index}`).join(" ");
+    const [result] = await router.executeToolCalls([
+      { id: "1", name: "output", input: { content: largeOutput } },
+    ]);
+
+    expect(result?.content).toContain("... [truncated");
+    expect(result?.content).toContain("large_token_0");
+    expect(result?.content).toContain("large_token_3499");
   });
 });
