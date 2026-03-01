@@ -174,8 +174,8 @@ export class AgentLoop {
           logger.warn("Model hit max_tokens, compacting context and retrying turn");
           if (this.contextManager && consecutiveMaxTokenStops <= 1) {
             await this.contextManager.compact();
-            this.onStreamEnd?.(turnText);
             fullTextResponse += "\n";
+            this.onStreamEnd?.(fullTextResponse);
             continue;
           }
 
@@ -210,7 +210,7 @@ export class AgentLoop {
           }
 
           fullTextResponse += "\n";
-          this.onStreamEnd?.(turnText);
+          this.onStreamEnd?.(fullTextResponse);
           continue;
         }
 
@@ -224,8 +224,8 @@ export class AgentLoop {
           }
         }
 
-        this.onStreamEnd?.(turnText);
         fullTextResponse += "\n";
+        this.onStreamEnd?.(fullTextResponse);
       }
 
       return fullTextResponse;

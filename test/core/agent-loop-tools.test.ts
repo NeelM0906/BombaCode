@@ -131,7 +131,8 @@ function buildLoop(
   provider: LLMProvider,
   registry: ToolRegistry,
   maxTurns = 25,
-  contextManager?: ContextManager
+  contextManager?: ContextManager,
+  onStreamEnd?: (fullResponse: string) => void
 ): AgentLoop {
   const router = new ToolRouter({
     registry,
@@ -148,6 +149,7 @@ function buildLoop(
     toolRouter: router,
     contextManager,
     maxTurns,
+    onStreamEnd,
   });
 }
 
@@ -236,5 +238,23 @@ describe("AgentLoop tool integration", () => {
     expect(compact).toHaveBeenCalledTimes(1);
     expect(provider.calls).toBe(2);
     expect(response).toContain("Stopping to avoid an infinite retry loop");
+  });
+
+  it("emits cumulative response payloads through onStreamEnd", async () => {
+    const provider = new MockProvider("normal");
+    const registry = new ToolRegistry();
+    registry.register(new ReadFixtureTool());
+    const snapshots: string[] = [];
+
+    const loop = buildLoop(provider, registry, 25, undefined, (fullResponse) => {
+      snapshots.push(fullResponse);
+    });
+
+    const finalResponse = await loop.processUserInput("Read fixture");
+
+    expect(snapshots.length).toBe(2);
+    expect(snapshots[0]?.includes("I will read the file.")).toBe(true);
+    expect(snapshots[1]).toBe(finalResponse);
+    expect((snapshots[1] ?? "").length).toBeGreaterThan((snapshots[0] ?? "").length);
   });
 });
