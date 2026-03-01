@@ -192,13 +192,12 @@ export class ContextManager {
   ): Message[] {
     const compacted: Message[] = [];
     const recentIndices = new Set<number>();
+    const summaryIndexSet = new Set<number>(summaryIndices);
+    let summaryInserted = false;
 
     for (let index = recentStart; index < messages.length; index += 1) {
       recentIndices.add(index);
     }
-
-    const summaryStart = summaryIndices.length > 0 ? summaryIndices[0]! : -1;
-    const summaryEnd = summaryIndices.length > 0 ? summaryIndices[summaryIndices.length - 1]! : -1;
 
     for (let index = 0; index < messages.length; index += 1) {
       const message = messages[index];
@@ -211,9 +210,11 @@ export class ContextManager {
         continue;
       }
 
-      if (summaryText && summaryStart !== -1 && index === summaryStart) {
-        compacted.push({ role: "user", content: `[Context summary]: ${summaryText}` });
-        index = summaryEnd;
+      if (summaryText && summaryIndexSet.has(index)) {
+        if (!summaryInserted) {
+          compacted.push({ role: "user", content: `[Context summary]: ${summaryText}` });
+          summaryInserted = true;
+        }
         continue;
       }
 

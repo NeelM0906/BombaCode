@@ -194,4 +194,35 @@ describe("ContextManager", () => {
 
     infoSpy.mockRestore();
   });
+
+  it("keeps pinned messages even when they fall inside summary index boundaries", async () => {
+    const provider = new MockSummaryProvider();
+    const messageManager = new MessageManager();
+    seedConversation(messageManager, 18, 220);
+    messageManager.pin(3);
+
+    const pinnedMessage = messageManager.getMessages()[3];
+
+    const contextManager = new ContextManager({
+      provider,
+      messageManager,
+      model: "anthropic/claude-haiku-4-5",
+      maxContextTokens: 1_700,
+      reservedOutputTokens: 300,
+      systemPromptTokens: 100,
+      toolDefinitionTokens: 100,
+      compactThreshold: 0.5,
+    });
+
+    await contextManager.compact();
+
+    const compacted = messageManager.getMessages();
+    expect(
+      compacted.some(
+        (message) =>
+          message.role === pinnedMessage?.role &&
+          message.content === pinnedMessage?.content
+      )
+    ).toBe(true);
+  });
 });
