@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 export interface MultiLineInputState {
   value: string;
@@ -19,6 +19,8 @@ export interface MultiLineInputActions {
 
 export function useMultiLineInput(): [MultiLineInputState, MultiLineInputActions] {
   const [value, setValue] = useState("");
+  const valueRef = useRef(value);
+  valueRef.current = value;
 
   const state = useMemo<MultiLineInputState>(() => {
     const lines = value.length > 0 ? value.split("\n") : [""];
@@ -29,7 +31,7 @@ export function useMultiLineInput(): [MultiLineInputState, MultiLineInputActions
     };
   }, [value]);
 
-  const actions: MultiLineInputActions = {
+  const actions = useMemo<MultiLineInputActions>(() => ({
     insertChar(char: string): void {
       setValue((previous) => previous + char);
     },
@@ -68,11 +70,11 @@ export function useMultiLineInput(): [MultiLineInputState, MultiLineInputActions
     },
 
     submitAndClear(): string {
-      const trimmed = value.trim();
+      const trimmed = valueRef.current.trim();
       setValue("");
       return trimmed;
     },
-  };
+  }), []);
 
   return [state, actions];
 }
