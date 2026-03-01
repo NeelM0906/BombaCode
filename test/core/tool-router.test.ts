@@ -106,6 +106,50 @@ class OutputTool extends BaseTool {
   }
 }
 
+class MixedReadTool extends BaseTool {
+  name = "mixed_read";
+  description = "mixed read tool";
+  category = "readonly" as const;
+  inputSchema = { type: "object", properties: { tag: { type: "string" }, delayMs: { type: "number" } } };
+
+  constructor(private readonly events: string[]) {
+    super();
+  }
+
+  async run(input: ToolInput) {
+    const tag = typeof input.tag === "string" ? input.tag : "unknown";
+    const delayMs = typeof input.delayMs === "number" ? input.delayMs : 0;
+
+    this.events.push(`read-start-${tag}`);
+    await sleep(delayMs);
+    this.events.push(`read-end-${tag}`);
+
+    return { content: `read-${tag}`, isError: false };
+  }
+}
+
+class MixedWriteTool extends BaseTool {
+  name = "mixed_write";
+  description = "mixed write tool";
+  category = "write" as const;
+  inputSchema = { type: "object", properties: { tag: { type: "string" }, delayMs: { type: "number" } } };
+
+  constructor(private readonly events: string[]) {
+    super();
+  }
+
+  async run(input: ToolInput) {
+    const tag = typeof input.tag === "string" ? input.tag : "unknown";
+    const delayMs = typeof input.delayMs === "number" ? input.delayMs : 0;
+
+    this.events.push(`write-start-${tag}`);
+    await sleep(delayMs);
+    this.events.push(`write-end-${tag}`);
+
+    return { content: `write-${tag}`, isError: false };
+  }
+}
+
 describe("ToolRouter", () => {
   it("executes tool calls", async () => {
     const registry = new ToolRegistry();
@@ -271,5 +315,33 @@ describe("ToolRouter", () => {
     expect(result?.content).toContain("... [truncated");
     expect(result?.content).toContain("large_token_0");
     expect(result?.content).toContain("large_token_3499");
+  });
+
+  it("preserves mixed readonly+write call order while deferring writes until reads finish", async () => {
+    const events: string[] = [];
+    const registry = new ToolRegistry();
+    registry.register(new MixedReadTool(events));
+    registry.register(new MixedWriteTool(events));
+
+    const router = new ToolRouter({
+      registry,
+      permissionManager: new PermissionManager("yolo"),
+      checkpointManager: new CheckpointManager(),
+    });
+
+    const results = await router.executeToolCalls([
+      { id: "1", name: "mixed_read", input: { tag: "A", delayMs: 80 } },
+      { id: "2", name: "mixed_write", input: { tag: "B", delayMs: 10 } },
+      { id: "3", name: "mixed_read", input: { tag: "C", delayMs: 80 } },
+    ]);
+
+    expect(results.map((result) => result.toolUseId)).toEqual(["1", "2", "3"]);
+
+    const writeStart = events.indexOf("write-start-B");
+    const readEndA = events.indexOf("read-end-A");
+    const readEndC = events.indexOf("read-end-C");
+
+    expect(writeStart).toBeGreaterThan(readEndA);
+    expect(writeStart).toBeGreaterThan(readEndC);
   });
 });
