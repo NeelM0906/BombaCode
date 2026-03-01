@@ -178,6 +178,88 @@ describe("AnthropicProvider", () => {
     expect(events[events.length - 1]).toEqual({ type: "done", stopReason: "tool_use" });
   });
 
+  it("maps anthropic streaming final stop_reason=end_turn", async () => {
+    const streamMock = vi.fn().mockReturnValue(
+      makeAnthropicStream(
+        [
+          {
+            type: "content_block_delta",
+            delta: { type: "text_delta", text: "All set." },
+          },
+        ],
+        {
+          usage: {
+            input_tokens: 30,
+            output_tokens: 8,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+          },
+          stop_reason: "end_turn",
+        }
+      )
+    );
+
+    const provider = new AnthropicProvider("test-key");
+    (provider as unknown as { client: unknown }).client = {
+      messages: {
+        create: vi.fn(),
+        stream: streamMock,
+      },
+    };
+
+    const events: StreamEvent[] = [];
+    for await (const event of provider.streamMessage({
+      model: "anthropic/claude-sonnet-4-6",
+      messages: [{ role: "user", content: "quick response" }],
+      maxTokens: 1024,
+    })) {
+      events.push(event);
+    }
+
+    expect(events[events.length - 1]).toEqual({ type: "done", stopReason: "end_turn" });
+  });
+
+  it("maps anthropic streaming final stop_reason=max_tokens", async () => {
+    const streamMock = vi.fn().mockReturnValue(
+      makeAnthropicStream(
+        [
+          {
+            type: "content_block_delta",
+            delta: { type: "text_delta", text: "Cut off." },
+          },
+        ],
+        {
+          usage: {
+            input_tokens: 30,
+            output_tokens: 1024,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+          },
+          stop_reason: "max_tokens",
+        }
+      )
+    );
+
+    const provider = new AnthropicProvider("test-key");
+    (provider as unknown as { client: unknown }).client = {
+      messages: {
+        create: vi.fn(),
+        stream: streamMock,
+      },
+    };
+
+    const events: StreamEvent[] = [];
+    for await (const event of provider.streamMessage({
+      model: "anthropic/claude-sonnet-4-6",
+      messages: [{ role: "user", content: "very long response" }],
+      maxTokens: 1024,
+    })) {
+      events.push(event);
+    }
+
+    expect(events[events.length - 1]).toEqual({ type: "done", stopReason: "max_tokens" });
+  });
+
   it("exposes provider capability helpers", () => {
     const provider = new AnthropicProvider("test-key");
 

@@ -177,6 +177,60 @@ describe("OpenRouterProvider", () => {
     expect(events[events.length - 1]).toEqual({ type: "done", stopReason: "tool_use" });
   });
 
+  it("maps streaming finish_reason=stop to done.stopReason=end_turn", async () => {
+    const createMock = vi.fn().mockResolvedValue(
+      asAsyncIterable([
+        { choices: [{ delta: { content: "Short answer." } }] },
+        {
+          choices: [{ delta: {}, finish_reason: "stop" }],
+          usage: { prompt_tokens: 22, completion_tokens: 6 },
+        },
+      ])
+    );
+
+    const provider = new OpenRouterProvider("test-key");
+    (provider as unknown as { client: unknown }).client = {
+      chat: { completions: { create: createMock } },
+    };
+
+    const events: StreamEvent[] = [];
+    for await (const event of provider.streamMessage({
+      model: "openai/gpt-4o",
+      messages: [{ role: "user", content: "Say hi" }],
+    })) {
+      events.push(event);
+    }
+
+    expect(events[events.length - 1]).toEqual({ type: "done", stopReason: "end_turn" });
+  });
+
+  it("maps streaming finish_reason=length to done.stopReason=max_tokens", async () => {
+    const createMock = vi.fn().mockResolvedValue(
+      asAsyncIterable([
+        { choices: [{ delta: { content: "Long answer..." } }] },
+        {
+          choices: [{ delta: {}, finish_reason: "length" }],
+          usage: { prompt_tokens: 120, completion_tokens: 4096 },
+        },
+      ])
+    );
+
+    const provider = new OpenRouterProvider("test-key");
+    (provider as unknown as { client: unknown }).client = {
+      chat: { completions: { create: createMock } },
+    };
+
+    const events: StreamEvent[] = [];
+    for await (const event of provider.streamMessage({
+      model: "openai/gpt-4o",
+      messages: [{ role: "user", content: "Generate a huge response" }],
+    })) {
+      events.push(event);
+    }
+
+    expect(events[events.length - 1]).toEqual({ type: "done", stopReason: "max_tokens" });
+  });
+
   it("exposes provider capabilities", () => {
     const provider = new OpenRouterProvider("test-key");
 

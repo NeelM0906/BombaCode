@@ -185,6 +185,70 @@ describe("OpenAICompatProvider", () => {
     expect(events[events.length - 1]).toEqual({ type: "done", stopReason: "tool_use" });
   });
 
+  it("maps streaming finish_reason=stop to done.stopReason=end_turn", async () => {
+    const createMock = vi.fn().mockResolvedValue(
+      asAsyncIterable([
+        {
+          choices: [{ delta: { content: "Done." } }],
+        },
+        {
+          choices: [{ delta: {}, finish_reason: "stop" }],
+          usage: {
+            prompt_tokens: 12,
+            completion_tokens: 4,
+          },
+        },
+      ])
+    );
+
+    const provider = new OpenAICompatProvider("http://localhost:4000/v1", "test-key");
+    (provider as unknown as { client: unknown }).client = {
+      chat: { completions: { create: createMock } },
+    };
+
+    const events: StreamEvent[] = [];
+    for await (const event of provider.streamMessage({
+      model: "openai/gpt-4o",
+      messages: [{ role: "user", content: "done?" }],
+    })) {
+      events.push(event);
+    }
+
+    expect(events[events.length - 1]).toEqual({ type: "done", stopReason: "end_turn" });
+  });
+
+  it("maps streaming finish_reason=length to done.stopReason=max_tokens", async () => {
+    const createMock = vi.fn().mockResolvedValue(
+      asAsyncIterable([
+        {
+          choices: [{ delta: { content: "Truncated..." } }],
+        },
+        {
+          choices: [{ delta: {}, finish_reason: "length" }],
+          usage: {
+            prompt_tokens: 100,
+            completion_tokens: 4096,
+          },
+        },
+      ])
+    );
+
+    const provider = new OpenAICompatProvider("http://localhost:4000/v1", "test-key");
+    (provider as unknown as { client: unknown }).client = {
+      chat: { completions: { create: createMock } },
+    };
+
+    const events: StreamEvent[] = [];
+    for await (const event of provider.streamMessage({
+      model: "openai/gpt-4o",
+      messages: [{ role: "user", content: "long output" }],
+    })) {
+      events.push(event);
+    }
+
+    expect(events[events.length - 1]).toEqual({ type: "done", stopReason: "max_tokens" });
+  });
+
   it("exposes provider capability helpers", () => {
     const provider = new OpenAICompatProvider("http://localhost:4000/v1", "test-key");
 
