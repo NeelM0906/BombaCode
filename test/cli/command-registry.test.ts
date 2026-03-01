@@ -109,4 +109,119 @@ describe("SlashCommandRegistry", () => {
       })
     ).toThrow("already registered");
   });
+
+  it("rejects empty command name", () => {
+    const registry = new SlashCommandRegistry();
+
+    expect(() =>
+      registry.register({
+        name: "",
+        description: "Empty",
+        argHint: "",
+        aliases: [],
+        handler: vi.fn(),
+      })
+    ).toThrow("Command name cannot be empty");
+  });
+
+  it("rejects alias that matches its own command name", () => {
+    const registry = new SlashCommandRegistry();
+
+    expect(() =>
+      registry.register({
+        name: "exit",
+        description: "Exit app",
+        argHint: "",
+        aliases: ["exit"],
+        handler: vi.fn(),
+      })
+    ).toThrow("cannot match command name");
+  });
+
+  it("propagates async handler errors through execute", async () => {
+    const registry = new SlashCommandRegistry();
+    const handler = vi.fn().mockRejectedValue(new Error("boom"));
+
+    registry.register({
+      name: "cmd",
+      description: "Failing command",
+      argHint: "",
+      aliases: [],
+      handler,
+    });
+
+    await expect(registry.execute("/cmd")).rejects.toThrow("boom");
+  });
+
+  it("resolves command when getCommand input has a leading slash", () => {
+    const registry = new SlashCommandRegistry();
+    const handler = vi.fn();
+
+    registry.register({
+      name: "exit",
+      description: "Exit app",
+      argHint: "",
+      aliases: [],
+      handler,
+    });
+
+    expect(registry.getCommand("/exit")?.name).toBe("exit");
+  });
+
+  it("executes a command via its alias", async () => {
+    const registry = new SlashCommandRegistry();
+    const handler = vi.fn();
+
+    registry.register({
+      name: "exit",
+      description: "Exit app",
+      argHint: "",
+      aliases: ["quit"],
+      handler,
+    });
+
+    await expect(registry.execute("/quit")).resolves.toBe(true);
+    expect(handler).toHaveBeenCalledWith("/quit");
+  });
+
+  it("returns undefined from getCommand for empty and whitespace input", () => {
+    const registry = new SlashCommandRegistry();
+    const handler = vi.fn();
+
+    registry.register({
+      name: "exit",
+      description: "Exit app",
+      argHint: "",
+      aliases: [],
+      handler,
+    });
+
+    expect(registry.getCommand("")).toBeUndefined();
+    expect(registry.getCommand("  ")).toBeUndefined();
+  });
+
+  it("returns multiple matches from filterByPrefix", () => {
+    const registry = new SlashCommandRegistry();
+    const noop = vi.fn();
+
+    registry.register({
+      name: "clear",
+      description: "Clear screen",
+      argHint: "",
+      aliases: [],
+      handler: noop,
+    });
+    registry.register({
+      name: "cost",
+      description: "Show cost",
+      argHint: "",
+      aliases: [],
+      handler: noop,
+    });
+
+    const matches = registry.filterByPrefix("c").map((command) => command.name);
+    expect(matches).toHaveLength(2);
+    expect(matches).toContain("clear");
+    expect(matches).toContain("cost");
+  });
 });
