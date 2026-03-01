@@ -225,4 +225,28 @@ describe("ContextManager", () => {
       )
     ).toBe(true);
   });
+
+  it("keeps all messages verbatim when the full conversation is recent (<10)", async () => {
+    const provider = new MockSummaryProvider();
+    const messageManager = new MessageManager();
+    seedConversation(messageManager, 8, 140);
+
+    const original = messageManager.getMessages();
+
+    const contextManager = new ContextManager({
+      provider,
+      messageManager,
+      model: "anthropic/claude-haiku-4-5",
+      maxContextTokens: 20_000,
+      reservedOutputTokens: 1_000,
+      systemPromptTokens: 100,
+      toolDefinitionTokens: 100,
+      compactThreshold: 0.5,
+    });
+
+    await contextManager.compact();
+
+    expect(provider.createCalls).toBe(0);
+    expect(messageManager.getMessages()).toEqual(original);
+  });
 });
