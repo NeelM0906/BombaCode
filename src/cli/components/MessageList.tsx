@@ -9,6 +9,7 @@ interface MessageListProps {
   streamingText?: string;
   activeToolCalls?: Map<string, ToolCall>;
   toolResults?: Map<string, ToolResult>;
+  expandedToolId?: string | null;
 }
 
 function createToolResultMap(
@@ -61,6 +62,7 @@ export const MessageList: React.FC<MessageListProps> = ({
   streamingText,
   activeToolCalls,
   toolResults,
+  expandedToolId,
 }) => {
   const resultMap = createToolResultMap(messages, toolResults);
 
@@ -86,6 +88,7 @@ export const MessageList: React.FC<MessageListProps> = ({
                     toolCall={toolCall}
                     result={result}
                     isRunning={isRunning}
+                    isExpanded={expandedToolId === toolCall.id}
                   />
                 );
               })}
