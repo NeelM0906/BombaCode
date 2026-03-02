@@ -17,19 +17,19 @@ describe("CostTracker", () => {
     expect(tracker.getTurnCount()).toBe(1);
   });
 
-  it("applies 90% discount on cache reads (additive, not subtracted)", () => {
+  it("applies 90% discount on cache reads (subtracted from inputTokens)", () => {
     const tracker = new CostTracker();
-    // 1000 base input + 500 cache reads (reported separately by Anthropic)
+    // inputTokens includes cache reads (OpenRouter convention)
     tracker.recordUsage("anthropic/claude-sonnet-4-6", {
       inputTokens: 1000,
       outputTokens: 0,
       cacheReadTokens: 500,
     });
 
-    // base: 1000 * $3/1M = $0.003
+    // non-cached input: (1000 - 500) * $3/1M = $0.0015
     // cache reads: 500 * $3/1M * 0.1 = $0.00015
-    // total: $0.00315
-    expect(tracker.getSessionCost()).toBeCloseTo(0.00315, 6);
+    // total: $0.00165
+    expect(tracker.getSessionCost()).toBeCloseTo(0.00165, 6);
   });
 
   it("applies 25% surcharge on cache writes", () => {
@@ -46,6 +46,7 @@ describe("CostTracker", () => {
 
   it("handles combined base + cache read + cache write correctly", () => {
     const tracker = new CostTracker();
+    // inputTokens (100K) includes cacheRead (80K) + cacheWrite (20K)
     tracker.recordUsage("anthropic/claude-sonnet-4-6", {
       inputTokens: 100_000,
       outputTokens: 50_000,
@@ -53,11 +54,11 @@ describe("CostTracker", () => {
       cacheWriteTokens: 20_000,
     });
 
-    // base input: 100K * $3/1M = $0.30
+    // non-cached input: max(0, 100K - 80K - 20K) = 0 → $0
     // output: 50K * $15/1M = $0.75
     // cache reads: 80K * $3/1M * 0.1 = $0.024
     // cache writes: 20K * $3/1M * 1.25 = $0.075
-    const expected = 0.3 + 0.75 + 0.024 + 0.075;
+    const expected = 0 + 0.75 + 0.024 + 0.075;
     expect(tracker.getSessionCost()).toBeCloseTo(expected, 4);
   });
 

@@ -54,18 +54,22 @@ export class CostTracker {
 
     const pricing = MODEL_PRICING[model] ?? DEFAULT_PRICING;
 
-    // Anthropic reports cache tokens separately from inputTokens,
-    // so compute each segment independently:
-    //   - base input tokens at full price
-    //   - output tokens at full price
+    // OpenRouter (and some providers) include cached tokens inside
+    // inputTokens (prompt_tokens), so we must subtract them to avoid
+    // double-counting.  The three input-side segments are:
+    //   - non-cached input tokens at full price
     //   - cache reads at 10% of input price (90% discount)
     //   - cache writes at 125% of input price (25% surcharge)
-    const baseCost =
-      (usage.inputTokens * pricing.input + usage.outputTokens * pricing.output) / 1_000_000;
-    const cacheReadCost = ((usage.cacheReadTokens ?? 0) * pricing.input * 0.1) / 1_000_000;
-    const cacheWriteCost = ((usage.cacheWriteTokens ?? 0) * pricing.input * 1.25) / 1_000_000;
+    const cacheRead = usage.cacheReadTokens ?? 0;
+    const cacheWrite = usage.cacheWriteTokens ?? 0;
+    const nonCachedInputTokens = Math.max(0, usage.inputTokens - cacheRead - cacheWrite);
 
-    this.totalCost += baseCost + cacheReadCost + cacheWriteCost;
+    const inputCost = (nonCachedInputTokens * pricing.input) / 1_000_000;
+    const outputCost = (usage.outputTokens * pricing.output) / 1_000_000;
+    const cacheReadCost = (cacheRead * pricing.input * 0.1) / 1_000_000;
+    const cacheWriteCost = (cacheWrite * pricing.input * 1.25) / 1_000_000;
+
+    this.totalCost += inputCost + outputCost + cacheReadCost + cacheWriteCost;
   }
 
   getSessionCost(): number {

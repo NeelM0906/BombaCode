@@ -83,6 +83,82 @@ describe("OpenRouterProvider", () => {
     });
   });
 
+  it("applies cache_control to last tool message for Claude models", async () => {
+    const createMock = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          finish_reason: "stop",
+          message: { content: "Here is the result.", tool_calls: [] },
+        },
+      ],
+      usage: { prompt_tokens: 300, completion_tokens: 20 },
+    });
+
+    const provider = new OpenRouterProvider("test-key");
+    (provider as unknown as { client: unknown }).client = {
+      chat: { completions: { create: createMock } },
+    };
+
+    await provider.createMessage({
+      model: "anthropic/claude-sonnet-4-6",
+      systemPrompt: "You are BombaCode.",
+      messages: [
+        { role: "user", content: "Read the file" },
+        {
+          role: "assistant",
+          content: "I'll read that file.",
+          toolCalls: [
+            { id: "call_1", name: "read", input: { file_path: "src/index.ts" } },
+          ],
+        },
+        { role: "tool", toolUseId: "call_1", content: "file contents here" },
+      ],
+    });
+
+    const [payload] = createMock.mock.calls[0];
+    // Last message is a tool result — it should have cache_control for Claude models
+    const lastMsg = payload.messages[payload.messages.length - 1];
+    expect(lastMsg.role).toBe("tool");
+    expect(lastMsg.cache_control).toEqual({ type: "ephemeral" });
+  });
+
+  it("does not apply cache_control to last tool message for non-Claude models", async () => {
+    const createMock = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          finish_reason: "stop",
+          message: { content: "Done.", tool_calls: [] },
+        },
+      ],
+      usage: { prompt_tokens: 150, completion_tokens: 10 },
+    });
+
+    const provider = new OpenRouterProvider("test-key");
+    (provider as unknown as { client: unknown }).client = {
+      chat: { completions: { create: createMock } },
+    };
+
+    await provider.createMessage({
+      model: "openai/gpt-4o",
+      messages: [
+        { role: "user", content: "Read the file" },
+        {
+          role: "assistant",
+          content: "Reading.",
+          toolCalls: [
+            { id: "call_1", name: "read", input: { file_path: "src/index.ts" } },
+          ],
+        },
+        { role: "tool", toolUseId: "call_1", content: "file contents here" },
+      ],
+    });
+
+    const [payload] = createMock.mock.calls[0];
+    const lastMsg = payload.messages[payload.messages.length - 1];
+    expect(lastMsg.role).toBe("tool");
+    expect(lastMsg.cache_control).toBeUndefined();
+  });
+
   it("maps finish_reason=length to max_tokens stopReason", async () => {
     const createMock = vi.fn().mockResolvedValue({
       choices: [

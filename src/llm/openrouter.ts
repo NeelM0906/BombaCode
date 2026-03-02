@@ -295,7 +295,7 @@ export class OpenRouterProvider implements LLMProvider {
       }
     }
 
-    // For Claude models, add a cache breakpoint to the last user message.
+    // For Claude models, add a cache breakpoint to the last message.
     // This implements the "moving cache" pattern: each turn caches everything
     // up to this point, so the next turn only processes new content.
     if (isClaude && msgs.length > 0) {
@@ -314,6 +314,12 @@ export class OpenRouterProvider implements LLMProvider {
             ] as unknown as string,
           };
         }
+      } else if (lastMsg.role === "tool") {
+        // For tool results, add cache_control to enable the moving cache breakpoint.
+        // OpenRouter passes this through to Anthropic for Claude models.
+        (lastMsg as unknown as Record<string, unknown>).cache_control = {
+          type: "ephemeral",
+        };
       }
     }
 
