@@ -9,8 +9,8 @@ interface DiffViewProps {
 
 export const DiffView: React.FC<DiffViewProps> = ({ filePath, diff, maxLines = 20 }) => {
   const lines = diff.split("\n");
-  const hiddenLineCount = Math.max(0, lines.length - maxLines);
-  const visibleLines = lines.slice(0, maxLines);
+  const visibleLines = maxLines === Infinity ? lines : lines.slice(0, maxLines);
+  const hiddenLineCount = maxLines === Infinity ? 0 : Math.max(0, lines.length - maxLines);
 
   return (
     <Box flexDirection="column" marginTop={1}>
