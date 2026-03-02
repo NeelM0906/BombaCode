@@ -50,7 +50,7 @@ export class OpenRouterProvider implements LLMProvider {
   }
 
   supportsCaching(): boolean {
-    return false;
+    return true;
   }
 
   estimateTokens(text: string): number {
@@ -59,12 +59,17 @@ export class OpenRouterProvider implements LLMProvider {
 
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
     const messages = this.buildMessages(request);
-    const tools = request.tools?.map((t) => ({
+    const isClaude = this.isClaudeModel(request.model);
+    const tools = request.tools?.map((t, index, arr) => ({
       type: "function" as const,
       function: {
         name: t.name,
         description: t.description,
         parameters: t.inputSchema,
+        // For Claude models, cache the tool definitions by marking the last tool
+        ...(isClaude && index === arr.length - 1
+          ? { cache_control: { type: "ephemeral" as const } }
+          : {}),
       },
     }));
 
@@ -95,9 +100,14 @@ export class OpenRouterProvider implements LLMProvider {
         input: parseToolArguments(tc.function.arguments),
       }));
 
+    // Extract cache token usage from the response when available (Claude via OpenRouter)
+    const promptDetails = (response.usage as unknown as Record<string, unknown>)
+      ?.prompt_tokens_details as Record<string, number> | undefined;
     const usage: TokenUsage = {
       inputTokens: response.usage?.prompt_tokens ?? 0,
       outputTokens: response.usage?.completion_tokens ?? 0,
+      cacheReadTokens: promptDetails?.cached_tokens,
+      cacheWriteTokens: undefined,
     };
 
     const stopReason =
@@ -112,12 +122,17 @@ export class OpenRouterProvider implements LLMProvider {
 
   async *streamMessage(request: LLMRequest): AsyncGenerator<StreamEvent> {
     const messages = this.buildMessages(request);
-    const tools = request.tools?.map((t) => ({
+    const isClaude = this.isClaudeModel(request.model);
+    const tools = request.tools?.map((t, index, arr) => ({
       type: "function" as const,
       function: {
         name: t.name,
         description: t.description,
         parameters: t.inputSchema,
+        // For Claude models, cache the tool definitions by marking the last tool
+        ...(isClaude && index === arr.length - 1
+          ? { cache_control: { type: "ephemeral" as const } }
+          : {}),
       },
     }));
 
@@ -182,11 +197,15 @@ export class OpenRouterProvider implements LLMProvider {
 
       // Usage info (comes with the final chunk when stream_options.include_usage is true)
       if (chunk.usage) {
+        const chunkPromptDetails = (chunk.usage as unknown as Record<string, unknown>)
+          ?.prompt_tokens_details as Record<string, number> | undefined;
         yield {
           type: "usage",
           usage: {
             inputTokens: chunk.usage.prompt_tokens ?? 0,
             outputTokens: chunk.usage.completion_tokens ?? 0,
+            cacheReadTokens: chunkPromptDetails?.cached_tokens,
+            cacheWriteTokens: undefined,
           },
         };
       }
@@ -221,13 +240,33 @@ export class OpenRouterProvider implements LLMProvider {
 
   // --- Private helpers ---
 
+  private isClaudeModel(model: string): boolean {
+    return model.includes("anthropic/") || model.includes("claude");
+  }
+
   private buildMessages(
     request: LLMRequest
   ): OpenAI.ChatCompletionMessageParam[] {
     const msgs: OpenAI.ChatCompletionMessageParam[] = [];
+    const isClaude = this.isClaudeModel(request.model);
 
+    // For Claude models, use multipart content with cache_control on the system prompt
+    // so OpenRouter passes Anthropic's prompt caching through.
     if (request.systemPrompt) {
-      msgs.push({ role: "system", content: request.systemPrompt });
+      if (isClaude) {
+        msgs.push({
+          role: "system",
+          content: [
+            {
+              type: "text",
+              text: request.systemPrompt,
+              cache_control: { type: "ephemeral" },
+            },
+          ] as unknown as string,
+        });
+      } else {
+        msgs.push({ role: "system", content: request.systemPrompt });
+      }
     }
 
     for (const msg of request.messages) {
@@ -253,6 +292,28 @@ export class OpenRouterProvider implements LLMProvider {
           tool_call_id: msg.toolUseId,
           content: msg.content,
         });
+      }
+    }
+
+    // For Claude models, add a cache breakpoint to the last user message.
+    // This implements the "moving cache" pattern: each turn caches everything
+    // up to this point, so the next turn only processes new content.
+    if (isClaude && msgs.length > 0) {
+      const lastMsg = msgs[msgs.length - 1]!;
+      if (lastMsg.role === "user") {
+        const content = lastMsg.content;
+        if (typeof content === "string") {
+          msgs[msgs.length - 1] = {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: content,
+                cache_control: { type: "ephemeral" },
+              },
+            ] as unknown as string,
+          };
+        }
       }
     }
 

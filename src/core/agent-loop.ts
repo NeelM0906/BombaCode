@@ -26,6 +26,46 @@ export interface AgentLoopConfig {
   onError?: (error: Error) => void;
 }
 
+/**
+ * Truncate large tool call inputs to prevent message history bloat.
+ * Tool results are already truncated by ToolRouter, but inputs (especially
+ * for write/edit with large file contents) are stored verbatim.
+ */
+function truncateToolCallInputs(toolCalls: ToolCall[]): ToolCall[] {
+  const INPUT_CHAR_LIMIT = 800; // ~200 tokens — enough for context, not full files
+
+  return toolCalls.map((tc) => {
+    // Only truncate write and edit tools — their inputs contain file content
+    if (tc.name !== "write" && tc.name !== "edit") {
+      return tc;
+    }
+
+    const truncatedInput = { ...tc.input };
+
+    // Truncate the 'content' field of write tool (full file body)
+    if (tc.name === "write" && typeof truncatedInput.content === "string") {
+      const content = truncatedInput.content as string;
+      if (content.length > INPUT_CHAR_LIMIT) {
+        const lineCount = content.split("\n").length;
+        truncatedInput.content = `[wrote ${lineCount} lines to ${truncatedInput.file_path ?? "file"}]`;
+      }
+    }
+
+    // Truncate the 'old_string' and 'new_string' fields of edit tool
+    if (tc.name === "edit") {
+      for (const key of ["old_string", "new_string"] as const) {
+        const val = truncatedInput[key];
+        if (typeof val === "string" && val.length > INPUT_CHAR_LIMIT) {
+          const lineCount = val.split("\n").length;
+          truncatedInput[key] = `[${lineCount} lines ${key === "old_string" ? "replaced" : "inserted"}]`;
+        }
+      }
+    }
+
+    return { ...tc, input: truncatedInput };
+  });
+}
+
 export class AgentLoop {
   private readonly messageManager: MessageManager;
   private readonly provider: LLMProvider;
@@ -57,7 +97,7 @@ export class AgentLoop {
     this.contextManager = config.contextManager;
     this.model = config.model;
     this.systemPrompt = config.systemPrompt ?? "";
-    this.maxTokens = config.maxTokens ?? 4096;
+    this.maxTokens = config.maxTokens ?? 32_768;
     this.maxTurns = config.maxTurns ?? 25;
     this.onStreamDelta = config.onStreamDelta;
     this.onStreamEnd = config.onStreamEnd;
@@ -166,7 +206,8 @@ export class AgentLoop {
           break;
         }
 
-        this.messageManager.addAssistantMessage(turnText, toolCalls.length > 0 ? toolCalls : undefined);
+        const storedToolCalls = toolCalls.length > 0 ? truncateToolCallInputs(toolCalls) : undefined;
+        this.messageManager.addAssistantMessage(turnText, storedToolCalls);
         fullTextResponse += turnText;
 
         if (lastStopReason === "max_tokens") {

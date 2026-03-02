@@ -60,16 +60,27 @@ describe("OpenRouterProvider", () => {
     expect(createMock).toHaveBeenCalledTimes(1);
     const [payload] = createMock.mock.calls[0];
     expect(payload.model).toBe("anthropic/claude-sonnet-4-6");
-    expect(payload.messages[0]).toEqual({ role: "system", content: "You are BombaCode." });
+    // Claude model: system prompt should be multipart with cache_control
+    expect(payload.messages[0].role).toBe("system");
+    expect(payload.messages[0].content).toEqual([
+      { type: "text", text: "You are BombaCode.", cache_control: { type: "ephemeral" } },
+    ]);
     expect(payload.tools).toHaveLength(1);
     expect(payload.tools[0].type).toBe("function");
+    // Claude model: last tool should have cache_control
+    expect(payload.tools[0].function.cache_control).toEqual({ type: "ephemeral" });
 
     expect(response.content).toBe("Let me search.");
     expect(response.stopReason).toBe("tool_use");
     expect(response.toolCalls).toEqual([
       { id: "call_1", name: "grep", input: { pattern: "TODO" } },
     ]);
-    expect(response.usage).toEqual({ inputTokens: 200, outputTokens: 30 });
+    expect(response.usage).toEqual({
+      inputTokens: 200,
+      outputTokens: 30,
+      cacheReadTokens: undefined,
+      cacheWriteTokens: undefined,
+    });
   });
 
   it("maps finish_reason=length to max_tokens stopReason", async () => {
@@ -172,7 +183,7 @@ describe("OpenRouterProvider", () => {
 
     expect(events).toContainEqual({
       type: "usage",
-      usage: { inputTokens: 50, outputTokens: 10 },
+      usage: { inputTokens: 50, outputTokens: 10, cacheReadTokens: undefined, cacheWriteTokens: undefined },
     });
     expect(events[events.length - 1]).toEqual({ type: "done", stopReason: "tool_use" });
   });
@@ -236,7 +247,7 @@ describe("OpenRouterProvider", () => {
 
     expect(provider.supportsTools()).toBe(true);
     expect(provider.supportsThinking()).toBe(false);
-    expect(provider.supportsCaching()).toBe(false);
+    expect(provider.supportsCaching()).toBe(true);
     expect(provider.name).toBe("openrouter");
     expect(provider.getMaxContextTokens("anthropic/claude-sonnet-4-6")).toBe(200_000);
     expect(provider.getMaxContextTokens("unknown/model")).toBe(128_000);

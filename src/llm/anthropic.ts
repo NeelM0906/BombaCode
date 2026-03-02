@@ -47,10 +47,12 @@ export class AnthropicProvider implements LLMProvider {
     const messages = this.buildMessages(request);
     const system = this.buildSystemPrompt(request.systemPrompt);
     const thinking = this.buildThinking(request);
-    const tools = request.tools?.map((t) => ({
+    const tools = request.tools?.map((t, index, arr) => ({
       name: t.name,
       description: t.description,
       input_schema: t.inputSchema as Anthropic.Tool["input_schema"],
+      // Cache the entire tools block by marking the last tool
+      ...(index === arr.length - 1 ? { cache_control: { type: "ephemeral" as const } } : {}),
     }));
 
     // Strip the provider prefix for direct Anthropic calls
@@ -120,10 +122,12 @@ export class AnthropicProvider implements LLMProvider {
     const messages = this.buildMessages(request);
     const system = this.buildSystemPrompt(request.systemPrompt);
     const thinking = this.buildThinking(request);
-    const tools = request.tools?.map((t) => ({
+    const tools = request.tools?.map((t, index, arr) => ({
       name: t.name,
       description: t.description,
       input_schema: t.inputSchema as Anthropic.Tool["input_schema"],
+      // Cache the entire tools block by marking the last tool
+      ...(index === arr.length - 1 ? { cache_control: { type: "ephemeral" as const } } : {}),
     }));
 
     const model = this.stripProviderPrefix(request.model);
@@ -276,6 +280,28 @@ export class AnthropicProvider implements LLMProvider {
             },
           ],
         });
+      }
+    }
+
+    // Add cache breakpoint to the last message for the moving cache pattern.
+    // On each turn, the API caches everything up to this breakpoint, so the
+    // next turn only pays full price for the newly-appended message.
+    if (msgs.length > 0) {
+      const lastMsg = msgs[msgs.length - 1]!;
+      if (lastMsg.role === "user") {
+        const content = lastMsg.content;
+        if (typeof content === "string") {
+          msgs[msgs.length - 1] = {
+            role: "user",
+            content: [{ type: "text", text: content, cache_control: { type: "ephemeral" } }],
+          };
+        } else if (Array.isArray(content) && content.length > 0) {
+          // Already an array (tool_result blocks) — add cache_control to the last block
+          const lastBlock = content[content.length - 1];
+          if (lastBlock && typeof lastBlock === "object") {
+            (lastBlock as unknown as Record<string, unknown>).cache_control = { type: "ephemeral" };
+          }
+        }
       }
     }
 
