@@ -53,6 +53,66 @@ function parseMode(input: string): PermissionMode | null {
   return null;
 }
 
+function buildCombinedToolResultMap(
+  messages: Message[],
+  resultMap: Map<string, ToolResult>
+): Map<string, ToolResult> {
+  const combined = new Map<string, ToolResult>(resultMap);
+
+  for (const message of messages) {
+    if (message.role !== "tool") {
+      continue;
+    }
+
+    combined.set(message.toolUseId, {
+      toolUseId: message.toolUseId,
+      content: message.content,
+      isError: message.content.startsWith("Error:"),
+    });
+  }
+
+  return combined;
+}
+
+function isCollapsibleToolResult(toolCall: ToolCall, result: ToolResult): boolean {
+  if (toolCall.name === "read" || result.isError) {
+    return false;
+  }
+
+  const nonEmptyLines = result.content.split("\n").filter((line) => line.trim().length > 0).length;
+  return nonEmptyLines > 5;
+}
+
+function findLastCollapsibleToolId(
+  messages: Message[],
+  resultMap: Map<string, ToolResult>
+): string | null {
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const message = messages[messageIndex];
+    if (message.role !== "assistant" || !message.toolCalls) {
+      continue;
+    }
+
+    for (let toolIndex = message.toolCalls.length - 1; toolIndex >= 0; toolIndex -= 1) {
+      const toolCall = message.toolCalls[toolIndex];
+      if (!toolCall) {
+        continue;
+      }
+
+      const result = resultMap.get(toolCall.id);
+      if (!result) {
+        continue;
+      }
+
+      if (isCollapsibleToolResult(toolCall, result)) {
+        return toolCall.id;
+      }
+    }
+  }
+
+  return null;
+}
+
 export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) => {
   const { exit } = useApp();
 
@@ -70,6 +130,7 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
   const [activeToolCalls, setActiveToolCalls] = useState<Map<string, ToolCall>>(new Map());
   const [toolResults, setToolResults] = useState<Map<string, ToolResult>>(new Map());
   const [permissionRequest, setPermissionRequest] = useState<ToolCall | null>(null);
+  const [expandedToolId, setExpandedToolId] = useState<string | null>(null);
 
   const messageManagerRef = useRef<MessageManager>(new MessageManager());
   const contextManagerRef = useRef<ContextManager | null>(null);
@@ -194,6 +255,7 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
           setNotice("Cleared conversation state.");
           setToolResults(new Map());
           setActiveToolCalls(new Map());
+          setExpandedToolId(null);
         },
       });
       commandRegistry.register({
@@ -378,6 +440,7 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
       setNotice(undefined);
       setIsLoading(true);
       setStreamingText("");
+      setExpandedToolId(null);
 
       setMessages((prev) => [...prev, { role: "user", content: input }]);
 
@@ -423,6 +486,22 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
   }, [handleSubmit, initialPrompt]);
 
   useInput((inputChar, key) => {
+    if (key.ctrl && inputChar === "o") {
+      if (!expandedToolId) {
+        const combinedResults = buildCombinedToolResultMap(messages, toolResults);
+        const targetToolId = findLastCollapsibleToolId(messages, combinedResults);
+        if (targetToolId) {
+          setExpandedToolId(targetToolId);
+        }
+      }
+      return;
+    }
+
+    if (key.escape && expandedToolId) {
+      setExpandedToolId(null);
+      return;
+    }
+
     if (key.ctrl && inputChar === "c") {
       if (permissionRequest && permissionResolverRef.current) {
         handlePermissionDecision("denied");
@@ -462,6 +541,7 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
         streamingText={streamingText}
         activeToolCalls={activeToolCalls}
         toolResults={toolResults}
+        expandedToolId={expandedToolId}
       />
 
       {permissionRequest ? (
@@ -491,6 +571,7 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
           commandRegistry={commandRegistryRef.current ?? undefined}
           loading={isLoading}
           isFocused={!permissionRequest}
+          expandedToolId={expandedToolId}
         />
       </Box>
     </Box>

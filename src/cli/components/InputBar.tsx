@@ -11,6 +11,7 @@ interface InputBarProps {
   commandRegistry?: SlashCommandRegistry;
   loading?: boolean;
   isFocused?: boolean;
+  expandedToolId?: string | null;
 }
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -21,6 +22,7 @@ export const InputBar: React.FC<InputBarProps> = ({
   commandRegistry,
   loading = false,
   isFocused = true,
+  expandedToolId = null,
 }) => {
   const [inputState, inputActions] = useMultiLineInput();
   const [spinnerIdx, setSpinnerIdx] = useState(0);
@@ -116,6 +118,10 @@ export const InputBar: React.FC<InputBarProps> = ({
   useInput(
     (inputChar, key) => {
       const isNewLineShortcut = (key.return && key.shift) || (key.ctrl && inputChar === "j");
+
+      if (key.escape && expandedToolId) {
+        return;
+      }
 
       if (menuOpen) {
         if (key.escape) {
