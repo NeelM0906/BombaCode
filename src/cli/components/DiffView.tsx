@@ -5,9 +5,10 @@ interface DiffViewProps {
   filePath: string;
   diff: string;
   maxLines?: number;
+  showOverflowHint?: boolean;
 }
 
-export const DiffView: React.FC<DiffViewProps> = ({ filePath, diff, maxLines = 20 }) => {
+export const DiffView: React.FC<DiffViewProps> = ({ filePath, diff, maxLines = 20, showOverflowHint = true }) => {
   const lines = diff.split("\n");
   const visibleLines = maxLines === Infinity ? lines : lines.slice(0, maxLines);
   const hiddenLineCount = maxLines === Infinity ? 0 : Math.max(0, lines.length - maxLines);
@@ -54,7 +55,7 @@ export const DiffView: React.FC<DiffViewProps> = ({ filePath, diff, maxLines = 2
           </Text>
         );
       })}
-      {hiddenLineCount > 0 ? <Text dimColor>[{hiddenLineCount} more lines...]</Text> : null}
+      {hiddenLineCount > 0 && showOverflowHint ? <Text dimColor>[{hiddenLineCount} more lines...]</Text> : null}
     </Box>
   );
 };

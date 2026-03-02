@@ -24,6 +24,7 @@ import {
 import { registerBuiltinTools } from "../tools/index.js";
 import type { Settings } from "../memory/settings.js";
 import type { Message, TokenUsage, ToolCall, ToolResult } from "../llm/types.js";
+import { buildToolResultMap } from "./utils/tool-result-map.js";
 import { logger } from "../utils/logger.js";
 
 export interface AppProps {
@@ -53,34 +54,28 @@ function parseMode(input: string): PermissionMode | null {
   return null;
 }
 
-function buildCombinedToolResultMap(
-  messages: Message[],
-  resultMap: Map<string, ToolResult>
-): Map<string, ToolResult> {
-  const combined = new Map<string, ToolResult>(resultMap);
-
-  for (const message of messages) {
-    if (message.role !== "tool") {
-      continue;
-    }
-
-    combined.set(message.toolUseId, {
-      toolUseId: message.toolUseId,
-      content: message.content,
-      isError: message.content.startsWith("Error:"),
-    });
-  }
-
-  return combined;
-}
+/** Threshold for collapsing tool output (non-empty line count). */
+const COLLAPSED_LINE_LIMIT = 5;
 
 function isCollapsibleToolResult(toolCall: ToolCall, result: ToolResult): boolean {
   if (toolCall.name === "read" || result.isError) {
     return false;
   }
 
-  const nonEmptyLines = result.content.split("\n").filter((line) => line.trim().length > 0).length;
-  return nonEmptyLines > 5;
+  // For edit tools the content includes both a summary header and the diff.
+  // Only the diff portion (starting at the first @@ marker) determines
+  // whether the output is long enough to collapse.
+  let content = result.content;
+  if (toolCall.name === "edit") {
+    const diffStart = content.indexOf("@@");
+    if (diffStart === -1) {
+      return false; // no diff present — nothing to collapse
+    }
+    content = content.slice(diffStart);
+  }
+
+  const nonEmptyLines = content.split("\n").filter((line) => line.trim().length > 0).length;
+  return nonEmptyLines > COLLAPSED_LINE_LIMIT;
 }
 
 function findLastCollapsibleToolId(
@@ -149,6 +144,11 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
     const firstActive = activeToolCalls.values().next().value as ToolCall | undefined;
     return firstActive?.name;
   }, [activeToolCalls]);
+
+  const combinedResultMap = useMemo(
+    () => buildToolResultMap(messages, toolResults),
+    [messages, toolResults]
+  );
 
   const handlePermissionDecision = useCallback(
     (decision: PermissionPromptDecision) => {
@@ -487,9 +487,10 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
 
   useInput((inputChar, key) => {
     if (key.ctrl && inputChar === "o") {
-      if (!expandedToolId) {
-        const combinedResults = buildCombinedToolResultMap(messages, toolResults);
-        const targetToolId = findLastCollapsibleToolId(messages, combinedResults);
+      if (expandedToolId) {
+        setExpandedToolId(null);
+      } else {
+        const targetToolId = findLastCollapsibleToolId(messages, combinedResultMap);
         if (targetToolId) {
           setExpandedToolId(targetToolId);
         }
@@ -497,7 +498,7 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
       return;
     }
 
-    if (key.escape && expandedToolId) {
+    if (key.escape && expandedToolId && !permissionRequest) {
       setExpandedToolId(null);
       return;
     }
@@ -540,7 +541,7 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
         messages={messages}
         streamingText={streamingText}
         activeToolCalls={activeToolCalls}
-        toolResults={toolResults}
+        toolResults={combinedResultMap}
         expandedToolId={expandedToolId}
       />
 

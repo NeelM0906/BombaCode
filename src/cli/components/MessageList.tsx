@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import { MarkdownText } from "./MarkdownRenderer.js";
 import { ToolOutput } from "./ToolOutput.js";
+import { buildToolResultMap } from "../utils/tool-result-map.js";
 import type { Message, ToolCall, ToolResult } from "../../llm/types.js";
 
 interface MessageListProps {
@@ -10,27 +11,6 @@ interface MessageListProps {
   activeToolCalls?: Map<string, ToolCall>;
   toolResults?: Map<string, ToolResult>;
   expandedToolId?: string | null;
-}
-
-function createToolResultMap(
-  messages: Message[],
-  toolResults?: Map<string, ToolResult>
-): Map<string, ToolResult> {
-  const combined = new Map<string, ToolResult>(toolResults ? [...toolResults.entries()] : []);
-
-  for (const message of messages) {
-    if (message.role !== "tool") {
-      continue;
-    }
-
-    combined.set(message.toolUseId, {
-      toolUseId: message.toolUseId,
-      content: message.content,
-      isError: message.content.startsWith("Error:"),
-    });
-  }
-
-  return combined;
 }
 
 const UserMessage: React.FC<{ content: string }> = ({ content }) => (
@@ -64,7 +44,7 @@ export const MessageList: React.FC<MessageListProps> = ({
   toolResults,
   expandedToolId,
 }) => {
-  const resultMap = createToolResultMap(messages, toolResults);
+  const resultMap = buildToolResultMap(messages, toolResults);
 
   return (
     <Box flexDirection="column" flexGrow={1}>

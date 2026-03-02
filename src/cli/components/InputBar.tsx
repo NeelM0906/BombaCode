@@ -119,7 +119,7 @@ export const InputBar: React.FC<InputBarProps> = ({
     (inputChar, key) => {
       const isNewLineShortcut = (key.return && key.shift) || (key.ctrl && inputChar === "j");
 
-      if (key.escape && expandedToolId) {
+      if (key.escape && expandedToolId !== null) {
         return;
       }
 

@@ -14,7 +14,7 @@ interface ToolOutputProps {
 export const COLLAPSED_LINE_LIMIT = 5;
 
 export function summarizeReadOutput(result: ToolResult): string {
-  const lineCount = result.content.length === 0 ? 0 : result.content.split("\n").length;
+  const lineCount = result.content.split("\n").filter((line) => line.length > 0).length;
   return `Read ${lineCount} lines`;
 }
 
@@ -33,7 +33,7 @@ export function splitToolContent(
     };
   }
 
-  return { headerLine: null, bodyLines: lines };
+  return { headerLine: null, bodyLines: lines.filter((line) => line.trim().length > 0) };
 }
 
 export interface TextPreview {
@@ -109,7 +109,8 @@ export function buildTextPreview(
   }
 
   const { headerLine, bodyLines } = splitToolContent(content, toolName);
-  const lineCount = countNonEmptyLines(bodyLines);
+  // bodyLines is already filtered by splitToolContent — use length directly
+  const lineCount = bodyLines.length;
   const isCollapsible = lineCount > COLLAPSED_LINE_LIMIT;
 
   if (!isCollapsible) {
@@ -193,9 +194,24 @@ export const ToolOutput: React.FC<ToolOutputProps> = ({
                         filePath={String(toolCall.input.file_path ?? "(unknown)")}
                         diff={editPreview.diff}
                         maxLines={editPreview.maxLines}
+                        showOverflowHint={false}
                       />
                     ) : null}
                     {editPreview.footer ? <Text dimColor>{editPreview.footer}</Text> : null}
+                  </>
+                );
+              })()
+            : null}
+
+          {toolCall.name === "edit" && result.isError
+            ? (() => {
+                const preview = buildTextPreview(result.content, toolCall.name, isExpanded, result.isError);
+
+                return (
+                  <>
+                    {preview.headerLine ? <Text>{preview.headerLine}</Text> : null}
+                    {preview.visibleLines.length > 0 ? <Text>{preview.visibleLines.join("\n")}</Text> : null}
+                    {preview.footer ? <Text dimColor>{preview.footer}</Text> : null}
                   </>
                 );
               })()
