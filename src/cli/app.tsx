@@ -28,6 +28,7 @@ import { buildToolResultMap } from "./utils/tool-result-map.js";
 import { logger } from "../utils/logger.js";
 import { MCPServerManager } from "../mcp/server-manager.js";
 import { adaptAllMCPTools } from "../mcp/tool-adapter.js";
+import { HookManager } from "../hooks/hook-manager.js";
 
 export interface AppProps {
   settings: Settings;
@@ -142,6 +143,7 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
   const permissionResolverRef = useRef<((decision: PermissionDecision) => void) | null>(null);
   const submittedInitialPromptRef = useRef<string | undefined>(undefined);
   const mcpManagerRef = useRef<MCPServerManager | null>(null);
+  const hookManagerRef = useRef<HookManager | null>(null);
 
   const activeToolName = useMemo(() => {
     const firstActive = activeToolCalls.values().next().value as ToolCall | undefined;
@@ -375,6 +377,11 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
       });
       commandRegistryRef.current = commandRegistry;
 
+      // Initialize hook manager and load hooks from settings
+      const hookManager = new HookManager();
+      hookManager.loadFromSettings(settings);
+      hookManagerRef.current = hookManager;
+
       const manager = new PermissionManager(
         settings.permissions.mode ?? "normal",
         settings.permissions.customRules ?? []
@@ -386,6 +393,7 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
         registry,
         permissionManager: manager,
         checkpointManager: checkpointManagerRef.current,
+        hookManager,
         onToolStart: (toolCall) => {
           setActiveToolCalls((prev) => new Map(prev).set(toolCall.id, toolCall));
         },
@@ -414,6 +422,7 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
         toolRegistry: registry,
         toolRouter,
         contextManager,
+        hookManager,
         onStreamDelta: (text) => {
           setStreamingText((prev) => (prev ?? "") + text);
         },

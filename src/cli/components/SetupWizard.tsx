@@ -113,6 +113,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
         customRules: [],
       },
       mcpServers: {},
+      hooks: {},
     };
 
     try {
