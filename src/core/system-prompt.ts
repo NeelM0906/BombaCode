@@ -1,7 +1,11 @@
 import { getOS, getShell } from "../utils/platform.js";
 import { loadProjectMemory } from "../memory/project-memory.js";
 
-export function buildSystemPrompt(cwd: string): string {
+export interface SystemPromptOptions {
+  mcpTools?: Array<{ name: string; description: string }>;
+}
+
+export function buildSystemPrompt(cwd: string, options?: SystemPromptOptions): string {
   const date = new Date().toISOString();
   const os = getOS();
   const shell = getShell();
@@ -143,17 +147,22 @@ Per-tool guidance:
 - todo(todos)
 - ask_user(question, options)`;
 
+  let prompt = basePrompt;
+
+  // Append MCP tools if any are connected
+  const mcpTools = options?.mcpTools ?? [];
+  if (mcpTools.length > 0) {
+    const toolLines = mcpTools
+      .map((t) => `- ${t.name}: ${t.description}`)
+      .join("\n");
+    prompt += `\n\n# MCP Tools (from connected servers)\n\n${toolLines}\n\nMCP tools are prefixed with mcp_ and operate via external servers. Use them when their capabilities exceed built-in tools.`;
+  }
+
   // Append project memory if available
   const projectMemory = loadProjectMemory(cwd);
   if (projectMemory.trim()) {
-    return `${basePrompt}
-
-# Project Memory
-
-The following is project-specific context from BOMBA.md:
-
-${projectMemory}`;
+    prompt += `\n\n# Project Memory\n\nThe following is project-specific context from BOMBA.md:\n\n${projectMemory}`;
   }
 
-  return basePrompt;
+  return prompt;
 }

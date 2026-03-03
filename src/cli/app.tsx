@@ -26,6 +26,8 @@ import type { Settings } from "../memory/settings.js";
 import type { Message, TokenUsage, ToolCall, ToolResult } from "../llm/types.js";
 import { buildToolResultMap } from "./utils/tool-result-map.js";
 import { logger } from "../utils/logger.js";
+import { MCPServerManager } from "../mcp/server-manager.js";
+import { adaptAllMCPTools } from "../mcp/tool-adapter.js";
 
 export interface AppProps {
   settings: Settings;
@@ -139,6 +141,7 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
   const agentLoopRef = useRef<AgentLoop | null>(null);
   const permissionResolverRef = useRef<((decision: PermissionDecision) => void) | null>(null);
   const submittedInitialPromptRef = useRef<string | undefined>(undefined);
+  const mcpManagerRef = useRef<MCPServerManager | null>(null);
 
   const activeToolName = useMemo(() => {
     const firstActive = activeToolCalls.values().next().value as ToolCall | undefined;
@@ -188,6 +191,48 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
       const registry = new ToolRegistry();
       registerBuiltinTools(registry, process.cwd());
       toolRegistryRef.current = registry;
+
+      // Start MCP servers in background — tools become available asynchronously
+      const mcpServers = settings.mcpServers ?? {};
+      if (Object.keys(mcpServers).length > 0) {
+        const mcpManager = new MCPServerManager(mcpServers);
+        mcpManagerRef.current = mcpManager;
+
+        void mcpManager.startAll().then(async () => {
+          try {
+            const mcpTools = await mcpManager.getTools();
+            const adaptedTools = await adaptAllMCPTools(
+              mcpTools,
+              (name) => mcpManager.getClient(name)
+            );
+
+            for (const tool of adaptedTools) {
+              if (!registry.hasTool(tool.name)) {
+                registry.register(tool);
+              }
+            }
+
+            // Update system prompt with MCP tool info
+            const mcpToolInfo = mcpTools.map((t) => ({
+              name: `mcp_${t.name}`,
+              description: t.description,
+            }));
+            if (mcpToolInfo.length > 0 && agentLoopRef.current) {
+              const updatedPrompt = buildSystemPrompt(process.cwd(), {
+                mcpTools: mcpToolInfo,
+              });
+              agentLoopRef.current.setSystemPrompt(updatedPrompt);
+            }
+
+            logger.info("MCP tools registered", {
+              count: adaptedTools.length,
+            });
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            logger.error("Failed to register MCP tools", msg);
+          }
+        });
+      }
 
       const contextManager = new ContextManager({
         provider,
