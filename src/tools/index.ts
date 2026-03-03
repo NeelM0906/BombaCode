@@ -9,6 +9,9 @@ import { TodoTool } from "./todo.js";
 import { AskUserTool } from "./ask-user.js";
 import { WebSearchTool } from "./web-search.js";
 import { WebFetchTool } from "./web-fetch.js";
+import { TaskTool } from "./task.js";
+import type { TaskToolConfig } from "./task.js";
+import type { Tool } from "./base-tool.js";
 
 export function registerBuiltinTools(registry: ToolRegistry, cwd: string): void {
   registry.register(new ReadTool());
@@ -21,4 +24,24 @@ export function registerBuiltinTools(registry: ToolRegistry, cwd: string): void 
   registry.register(new AskUserTool());
   registry.register(new WebSearchTool());
   registry.register(new WebFetchTool());
+}
+
+/**
+ * Register all built-in tools including the task (sub-agent) tool.
+ * The task tool requires additional configuration for spawning sub-agents.
+ */
+export function registerAllTools(
+  registry: ToolRegistry,
+  cwd: string,
+  taskConfig: TaskToolConfig
+): void {
+  registerBuiltinTools(registry, cwd);
+  registry.register(new TaskTool(taskConfig));
+}
+
+/**
+ * Collect all registered tools into an array (used by TaskTool for sub-agent tool assignment).
+ */
+export function collectAllTools(registry: ToolRegistry): Tool[] {
+  return registry.getAllTools();
 }

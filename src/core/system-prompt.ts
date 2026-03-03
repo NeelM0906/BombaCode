@@ -160,7 +160,17 @@ Per-tool guidance:
 - todo(todos)
 - ask_user(question, options)
 - web_search(query, maxResults?)
-- web_fetch(url)`;
+- web_fetch(url)
+- task(description, model?, maxTurns?)
+
+## task
+- Spawn a sub-agent to perform a task autonomously in an isolated conversation.
+- Tools are auto-assigned based on the task description: read-only tasks get search tools, code modification tasks get all tools.
+- Use for delegating independent work: research, code analysis, multi-file changes, or parallel investigations.
+- Multiple task calls in the same turn execute in parallel — use this for concurrent work.
+- Sub-agents share the cost tracker but have isolated message history.
+- Keep task descriptions specific and self-contained; the sub-agent cannot see your conversation history.
+- Do not use task for simple operations that a single tool call can handle.`;
 
   let prompt = basePrompt;
 

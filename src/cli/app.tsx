@@ -21,7 +21,8 @@ import {
   type PermissionDecision,
   type PermissionMode,
 } from "../core/permission-manager.js";
-import { registerBuiltinTools } from "../tools/index.js";
+import { registerAllTools, collectAllTools } from "../tools/index.js";
+import { TaskTool } from "../tools/task.js";
 import type { Settings } from "../memory/settings.js";
 import type { Message, TokenUsage, ToolCall, ToolResult } from "../llm/types.js";
 import { buildToolResultMap } from "./utils/tool-result-map.js";
@@ -191,8 +192,20 @@ export const App: React.FC<AppProps> = ({ settings, initialPrompt, resumeId }) =
       const systemPrompt = buildSystemPrompt(process.cwd());
 
       const registry = new ToolRegistry();
-      registerBuiltinTools(registry, process.cwd());
+      registerAllTools(registry, process.cwd(), {
+        costTracker: costTrackerRef.current,
+        provider,
+        model: settings.defaultModel,
+        parentTools: [], // will be populated after registration
+        currentDepth: 0,
+      });
       toolRegistryRef.current = registry;
+
+      // Now that all tools are registered, update the task tool's parentTools reference
+      const taskTool = registry.getTool("task");
+      if (taskTool instanceof TaskTool) {
+        taskTool.setParentTools(collectAllTools(registry));
+      }
 
       // Start MCP servers in background — tools become available asynchronously
       const mcpServers = settings.mcpServers ?? {};
