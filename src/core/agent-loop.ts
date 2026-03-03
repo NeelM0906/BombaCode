@@ -6,6 +6,7 @@ import type { ToolRouter } from "./tool-router.js";
 import type { ContextManager } from "./context-manager.js";
 import { logger } from "../utils/logger.js";
 import { isAbortError } from "../llm/streaming.js";
+import { maskObservedToolResults } from "./observation-masking.js";
 
 export interface AgentLoopConfig {
   messageManager: MessageManager;
@@ -140,13 +141,16 @@ export class AgentLoop {
           await this.contextManager.ensureWithinBudget();
         }
 
+        // Mask previously observed tool results to reduce token usage
+        const maskedMessages = maskObservedToolResults(this.messageManager.getMessages());
+
         const requestTools = this.toolRegistry?.getToolDefinitions() ?? [];
 
         this.activeAbortController = new AbortController();
         const stream = this.provider.streamMessage({
           model: this.model,
           systemPrompt: this.systemPrompt,
-          messages: this.messageManager.getMessages(),
+          messages: maskedMessages,
           tools: requestTools.length > 0 ? requestTools : undefined,
           maxTokens: this.maxTokens,
           abortSignal: this.activeAbortController.signal,
