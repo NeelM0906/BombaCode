@@ -5,6 +5,7 @@ import type { ToolRegistry } from "./tool-registry.js";
 import type { ToolRouter } from "./tool-router.js";
 import type { ContextManager } from "./context-manager.js";
 import type { RepoMapManager } from "../codebase/repo-map.js";
+import type { HookManager } from "../hooks/hook-manager.js";
 import { logger } from "../utils/logger.js";
 import { isAbortError } from "../llm/streaming.js";
 import { maskObservedToolResults } from "./observation-masking.js";
@@ -21,6 +22,7 @@ export interface AgentLoopConfig {
   toolRouter?: ToolRouter;
   contextManager?: ContextManager;
   repoMapManager?: RepoMapManager;
+  hookManager?: HookManager;
   onStreamDelta?: (text: string) => void;
   onStreamEnd?: (fullResponse: string) => void;
   onUsageUpdate?: (usage: TokenUsage) => void;
@@ -78,6 +80,7 @@ export class AgentLoop {
   private readonly contextManager?: ContextManager;
   private readonly repoMapManager?: RepoMapManager;
   private repoMapMessageIndex: number = -1;
+  private readonly hookManager?: HookManager;
   private model: string;
   private systemPrompt: string;
   private maxTokens: number;
@@ -101,6 +104,7 @@ export class AgentLoop {
     this.toolRouter = config.toolRouter;
     this.contextManager = config.contextManager;
     this.repoMapManager = config.repoMapManager;
+    this.hookManager = config.hookManager;
     this.model = config.model;
     this.systemPrompt = config.systemPrompt ?? "";
     this.maxTokens = config.maxTokens ?? 32_768;
@@ -123,6 +127,9 @@ export class AgentLoop {
     let fullTextResponse = "";
 
     try {
+      // Fire session_start hook
+      await this.hookManager?.run("session_start");
+
       this.messageManager.addUserMessage(input);
 
       // Inject or refresh repo map as a user message
@@ -301,6 +308,12 @@ export class AgentLoop {
       this.onError?.(wrappedError);
       throw wrappedError;
     } finally {
+      // Fire stop hook when the agent finishes responding
+      await this.hookManager?.run("stop").catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.error("Stop hook failed", { error: msg });
+      });
+
       this.activeAbortController = null;
       this._isProcessing = false;
     }

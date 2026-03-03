@@ -2,6 +2,7 @@ import type { ToolCall, ToolResult } from "../llm/types.js";
 import type { ToolRegistry } from "./tool-registry.js";
 import type { PermissionManager, PermissionDecision } from "./permission-manager.js";
 import type { CheckpointManager } from "./checkpoint-manager.js";
+import type { HookManager } from "../hooks/hook-manager.js";
 import { TokenCounter } from "../llm/token-counter.js";
 import type { Tool } from "../tools/base-tool.js";
 import { logger } from "../utils/logger.js";
@@ -10,6 +11,7 @@ export interface ToolRouterConfig {
   registry: ToolRegistry;
   permissionManager: PermissionManager;
   checkpointManager: CheckpointManager;
+  hookManager?: HookManager;
   onToolStart?: (toolCall: ToolCall) => void;
   onToolEnd?: (toolCall: ToolCall, result: ToolResult) => void;
   onPermissionRequest?: (toolCall: ToolCall) => Promise<PermissionDecision>;
@@ -158,6 +160,14 @@ export class ToolRouter {
   private async executePreparedTool(call: ToolCall, tool: Tool): Promise<ToolResult> {
     this.config.onToolStart?.(call);
 
+    const toolInput = call.input as Record<string, unknown>;
+
+    // Fire pre_tool_use hook (informational only)
+    await this.config.hookManager?.run("pre_tool_use", {
+      toolName: call.name,
+      toolInput,
+    });
+
     try {
       if (tool.category === "write" || tool.category === "execute") {
         const filePath = call.input.file_path;
@@ -175,6 +185,23 @@ export class ToolRouter {
         isError: executionResult.isError,
       };
 
+      // Fire post_tool_use hook
+      await this.config.hookManager?.run("post_tool_use", {
+        toolName: call.name,
+        toolInput,
+        toolResult: formattedContent,
+      });
+
+      // Fire post_edit hook for write/edit tools
+      if ((call.name === "edit" || call.name === "write") && !executionResult.isError) {
+        const filePath = typeof toolInput.file_path === "string" ? toolInput.file_path : undefined;
+        await this.config.hookManager?.run("post_edit", {
+          toolName: call.name,
+          toolInput,
+          filePath,
+        });
+      }
+
       this.config.onToolEnd?.(call, toolResult);
       logger.debug("Tool executed", {
         tool: call.name,
@@ -190,6 +217,13 @@ export class ToolRouter {
         content: `Error executing tool "${call.name}": ${message}`,
         isError: true,
       };
+
+      // Fire post_tool_failure hook
+      await this.config.hookManager?.run("post_tool_failure", {
+        toolName: call.name,
+        toolInput,
+        error: error instanceof Error ? error : new Error(message),
+      });
 
       this.config.onToolEnd?.(call, toolResult);
       logger.error("Tool execution failed", {

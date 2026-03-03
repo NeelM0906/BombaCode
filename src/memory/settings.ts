@@ -24,6 +24,22 @@ const MCPServerSchema = z.object({
   env: z.record(z.string(), z.string()).optional(),
 });
 
+const HookEntrySchema = z.object({
+  command: z.string(),
+  matcher: z.string().optional(), // Regex to match tool name
+});
+
+/** Valid hook event names — validated at application level. */
+export const HOOK_EVENTS = [
+  "pre_tool_use",
+  "post_tool_use",
+  "post_tool_failure",
+  "pre_commit",
+  "session_start",
+  "stop",
+  "post_edit",
+] as const;
+
 export const SettingsSchema = z.object({
   provider: z.enum(["openrouter", "openai-compat", "anthropic"]).default("openrouter"),
   apiKey: z.string().optional(),
@@ -57,6 +73,7 @@ export const SettingsSchema = z.object({
       refreshInterval: z.number().default(5),
     })
     .default({ enabled: true, maxTokens: 1024, refreshInterval: 5 }),
+  hooks: z.record(z.string(), z.array(HookEntrySchema)).default({}),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;
@@ -90,6 +107,10 @@ function deepMerge(current: Settings, partial: Partial<Settings>): Settings {
     repoMap: {
       ...current.repoMap,
       ...partial.repoMap,
+    },
+    hooks: {
+      ...current.hooks,
+      ...partial.hooks,
     },
   };
 }

@@ -114,6 +114,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
       },
       mcpServers: {},
       repoMap: { enabled: true, maxTokens: 1024, refreshInterval: 5 },
+      hooks: {},
     };
 
     try {
