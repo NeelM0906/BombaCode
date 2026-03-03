@@ -4,6 +4,7 @@ import type { MessageManager } from "./message-manager.js";
 import type { ToolRegistry } from "./tool-registry.js";
 import type { ToolRouter } from "./tool-router.js";
 import type { ContextManager } from "./context-manager.js";
+import type { RepoMapManager } from "../codebase/repo-map.js";
 import { logger } from "../utils/logger.js";
 import { isAbortError } from "../llm/streaming.js";
 import { maskObservedToolResults } from "./observation-masking.js";
@@ -19,6 +20,7 @@ export interface AgentLoopConfig {
   toolRegistry?: ToolRegistry;
   toolRouter?: ToolRouter;
   contextManager?: ContextManager;
+  repoMapManager?: RepoMapManager;
   onStreamDelta?: (text: string) => void;
   onStreamEnd?: (fullResponse: string) => void;
   onUsageUpdate?: (usage: TokenUsage) => void;
@@ -74,6 +76,8 @@ export class AgentLoop {
   private readonly toolRegistry?: ToolRegistry;
   private readonly toolRouter?: ToolRouter;
   private readonly contextManager?: ContextManager;
+  private readonly repoMapManager?: RepoMapManager;
+  private repoMapMessageIndex: number = -1;
   private model: string;
   private systemPrompt: string;
   private maxTokens: number;
@@ -96,6 +100,7 @@ export class AgentLoop {
     this.toolRegistry = config.toolRegistry;
     this.toolRouter = config.toolRouter;
     this.contextManager = config.contextManager;
+    this.repoMapManager = config.repoMapManager;
     this.model = config.model;
     this.systemPrompt = config.systemPrompt ?? "";
     this.maxTokens = config.maxTokens ?? 32_768;
@@ -119,6 +124,10 @@ export class AgentLoop {
 
     try {
       this.messageManager.addUserMessage(input);
+
+      // Inject or refresh repo map as a user message
+      await this.injectRepoMap();
+
       let turnCount = 0;
       let consecutiveMaxTokenStops = 0;
 
@@ -269,6 +278,14 @@ export class AgentLoop {
           }
         }
 
+        // Track file changes from write/edit tool calls for repo map
+        this.trackFileChanges(toolCalls);
+
+        // Check if repo map needs refreshing after edits
+        if (this.repoMapManager?.shouldRefresh()) {
+          await this.refreshRepoMap();
+        }
+
         fullTextResponse += "\n";
         this.onStreamEnd?.(fullTextResponse);
       }
@@ -286,6 +303,83 @@ export class AgentLoop {
     } finally {
       this.activeAbortController = null;
       this._isProcessing = false;
+    }
+  }
+
+  /**
+   * Inject or refresh the repo map as a user message.
+   * On first call, generates and prepends the map.
+   * On subsequent calls, updates the existing map message if refresh is needed.
+   */
+  private async injectRepoMap(): Promise<void> {
+    if (!this.repoMapManager) return;
+
+    try {
+      const repoMap = await this.repoMapManager.getRepoMap();
+      if (!repoMap) return;
+
+      const mapContent = `[Repository Map]\n\n${repoMap}`;
+
+      if (this.repoMapMessageIndex === -1) {
+        // First injection: insert as the first message (before user's message)
+        const messages = this.messageManager.getMessages();
+        const repoMapMessage = { role: "user" as const, content: mapContent };
+        this.messageManager.setMessages([repoMapMessage, ...messages]);
+        this.repoMapMessageIndex = 0;
+        logger.info("Repo map injected", { files: this.repoMapManager.getFileCount() });
+      } else {
+        // Update existing repo map message in place
+        const messages = this.messageManager.getMessages();
+        if (this.repoMapMessageIndex < messages.length) {
+          messages[this.repoMapMessageIndex] = { role: "user" as const, content: mapContent };
+          this.messageManager.setMessages(messages);
+          logger.info("Repo map updated", { files: this.repoMapManager.getFileCount() });
+        }
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn("Failed to inject repo map", { error: message });
+    }
+  }
+
+  /**
+   * Track file changes from write/edit tool calls.
+   */
+  private trackFileChanges(toolCalls: ToolCall[]): void {
+    if (!this.repoMapManager) return;
+
+    for (const tc of toolCalls) {
+      if (tc.name === "write" || tc.name === "edit") {
+        const filePath = tc.input.file_path as string | undefined;
+        if (filePath) {
+          this.repoMapManager.markFileChanged(filePath);
+        }
+      }
+    }
+  }
+
+  /**
+   * Refresh the repo map after sufficient edits.
+   */
+  private async refreshRepoMap(): Promise<void> {
+    if (!this.repoMapManager) return;
+
+    try {
+      await this.repoMapManager.refresh();
+      const repoMap = await this.repoMapManager.getRepoMap();
+      if (!repoMap) return;
+
+      const mapContent = `[Repository Map]\n\n${repoMap}`;
+      const messages = this.messageManager.getMessages();
+      if (this.repoMapMessageIndex >= 0 && this.repoMapMessageIndex < messages.length) {
+        messages[this.repoMapMessageIndex] = { role: "user" as const, content: mapContent };
+        this.messageManager.setMessages(messages);
+        this.repoMapManager.resetEditCount();
+        logger.info("Repo map refreshed after edits", { files: this.repoMapManager.getFileCount() });
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn("Failed to refresh repo map", { error: message });
     }
   }
 

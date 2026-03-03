@@ -50,6 +50,13 @@ export const SettingsSchema = z.object({
       customRules: [],
     }),
   mcpServers: z.record(z.string(), MCPServerSchema).default({}),
+  repoMap: z
+    .object({
+      enabled: z.boolean().default(true),
+      maxTokens: z.number().default(1024),
+      refreshInterval: z.number().default(5),
+    })
+    .default({ enabled: true, maxTokens: 1024, refreshInterval: 5 }),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;
@@ -79,6 +86,10 @@ function deepMerge(current: Settings, partial: Partial<Settings>): Settings {
     mcpServers: {
       ...current.mcpServers,
       ...partial.mcpServers,
+    },
+    repoMap: {
+      ...current.repoMap,
+      ...partial.repoMap,
     },
   };
 }
