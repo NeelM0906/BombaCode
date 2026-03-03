@@ -7,6 +7,8 @@ import { GlobTool } from "./glob.js";
 import { GrepTool } from "./grep.js";
 import { TodoTool } from "./todo.js";
 import { AskUserTool } from "./ask-user.js";
+import { WebSearchTool } from "./web-search.js";
+import { WebFetchTool } from "./web-fetch.js";
 
 export function registerBuiltinTools(registry: ToolRegistry, cwd: string): void {
   registry.register(new ReadTool());
@@ -17,4 +19,6 @@ export function registerBuiltinTools(registry: ToolRegistry, cwd: string): void 
   registry.register(new GrepTool());
   registry.register(new TodoTool());
   registry.register(new AskUserTool());
+  registry.register(new WebSearchTool());
+  registry.register(new WebFetchTool());
 }

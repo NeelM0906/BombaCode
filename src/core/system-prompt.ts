@@ -92,6 +92,19 @@ Per-tool guidance:
 - Provide 2-4 concrete options with brief descriptions when possible.
 - Do not ask for confirmation on routine operations — proceed and report the outcome.
 
+## web_search
+- Search the web for current information, documentation, or solutions.
+- Requires the TAVILY_API_KEY environment variable to be set.
+- Use targeted, specific queries for best results.
+- Default returns 5 results; increase maxResults only when broader coverage is needed.
+
+## web_fetch
+- Fetch a URL and convert it to readable markdown using Readability.
+- Use for reading documentation pages, blog posts, and articles.
+- Results are cached for 15 minutes to avoid redundant requests.
+- Has a 10-second timeout. Do not use for very large pages or downloads.
+- Only supports http:// and https:// URLs.
+
 # Code Quality
 
 - Write clean, readable code. Prefer clarity over cleverness.
@@ -145,7 +158,9 @@ Per-tool guidance:
 - glob(pattern, path?)
 - grep(pattern, path?, glob?, output_mode?, context?, case_insensitive?)
 - todo(todos)
-- ask_user(question, options)`;
+- ask_user(question, options)
+- web_search(query, maxResults?)
+- web_fetch(url)`;
 
   let prompt = basePrompt;
 
